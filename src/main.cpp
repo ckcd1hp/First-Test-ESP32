@@ -7,19 +7,39 @@
 #include <WiFiUdp.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
-#include <WebSocketsServer.h>
+#include <ESPAsyncWebServer.h>
+#include <SPIFFS.h>
 
 #define UTC_OFFSET_IN_SECONDS -36000 // offset from greenwich time (Hawaii is UTC-10)
+#define LED_PIN 2
+
+String ledState;
 
 String getTimeStampString();
+String processor(const String &var)
+{
+  Serial.println(var);
+  if (var == "GPIO_STATE")
+  {
+    if (digitalRead(LED_PIN))
+    {
+      ledState = "ON";
+    }
+    else
+    {
+      ledState = "OFF";
+    }
+    Serial.print(ledState);
+    return ledState;
+  }
+  return String();
+}
 
 // SSID and password of Wifi connection:
 const char *ssid = "Beast";
 const char *password = "ca9786e7";
 
-WebServer server(80);
-WebSocketsServer webSocket = WebSocketsServer(81);
-String webpage = "<!DOCTYPE html><html><head><title>Page Title</title></head><body style='background-color: #EEEEEE;'><span style='color: #003366;'><h1>This is a Heading</h1><p>This is a paragraph.</p></span></body></html>";
+AsyncWebServer server(80);
 
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
@@ -35,6 +55,15 @@ unsigned long now;
 void setup()
 {
   Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+
+  // Initialize SPIFFS
+  if (!SPIFFS.begin(true))
+  {
+    Serial.println("An Error has occurred while mounting SPIFFS");
+    return;
+  }
+
   WiFi.mode(WIFI_STA); // station mode: ESP32 connects to access point
   WiFi.begin(ssid, password);
 
@@ -62,15 +91,32 @@ void setup()
   // setup() and you will see that in the loop the local time is automatically updated. Of course the ESP/Arduino does not have an infinitely accurate clock,
   // so if the exact time is very important you will need to re-sync once in a while.
   timeClient.update();
-  server.on("/", []()
-            { server.send(200, "text/html", webpage); });
+
+  // Route for root / web page
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(SPIFFS, "/index.html", String(), false, processor); });
+
+  // Route to load style.css file
+  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(SPIFFS, "/style.css", "text/css"); });
+
+  // Route to set GPIO to HIGH
+  server.on("/led2on", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+    digitalWrite(LED_PIN, HIGH);    
+    request->send(SPIFFS, "/index.html", String(), false, processor); });
+
+  // Route to set GPIO to LOW
+  server.on("/led2off", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+    digitalWrite(LED_PIN, LOW);    
+    request->send(SPIFFS, "/index.html", String(), false, processor); });
+
   server.begin();
 }
 
 void loop()
 {
-  server.handleClient();
-
   now = millis();
   if (now - previousMillis > interval)
   {
