@@ -9,31 +9,24 @@
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
+#include <ESP32Time.h>
 
 #define UTC_OFFSET_IN_SECONDS -36000 // offset from greenwich time (Hawaii is UTC-10)
 #define LED_PIN 2
+#define NTP_SYNC_HOUR 4
+#define NTP_SYNC_MINUTE 0
+#define NTP_SYNC_SECOND 0
 
 String ledState;
+// Define NTP Client to get time
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", UTC_OFFSET_IN_SECONDS);
+ESP32Time rtc; // no offset, as that is already added from NTPClient
+bool rtcUpdated = false;
 
-String getTimeStampString();
-String processor(const String &var)
-{
-  Serial.println(var);
-  if (var == "GPIO_STATE")
-  {
-    if (digitalRead(LED_PIN))
-    {
-      ledState = "ON";
-    }
-    else
-    {
-      ledState = "OFF";
-    }
-    Serial.print(ledState);
-    return ledState;
-  }
-  return String();
-}
+// function declarations
+void updateAndSyncTime();
+String processor(const String &var);
 
 // SSID and password of Wifi connection:
 const char *ssid = "Beast";
@@ -42,10 +35,6 @@ const char *password = "ca9786e7";
 AsyncWebServer server(80);
 
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-
-// Define NTP Client to get time
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", UTC_OFFSET_IN_SECONDS);
 
 // time interval setup
 int interval = 10000;
@@ -90,7 +79,7 @@ void setup()
   // they get pinged all the time, so I recommend to only re-sync to the NTP server occasionally. In this example code we only call this function once in the
   // setup() and you will see that in the loop the local time is automatically updated. Of course the ESP/Arduino does not have an infinitely accurate clock,
   // so if the exact time is very important you will need to re-sync once in a while.
-  timeClient.update();
+  updateAndSyncTime();
 
   // Route for root / web page
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -120,47 +109,57 @@ void loop()
   now = millis();
   if (now - previousMillis > interval)
   {
-    // Option1: Get time and day of the week directly (discussed in Youtube video)
-    Serial.print("Option 1: ");
-    Serial.print(daysOfTheWeek[timeClient.getDay()]);
-    Serial.print(", ");
-    Serial.print(timeClient.getHours());
-    Serial.print(":");
-    Serial.print(timeClient.getMinutes());
-    Serial.print(":");
-    Serial.println(timeClient.getSeconds());
-
-    // Option 2: abstract from formatted date (added later as per request)
-    Serial.print("Option 2: ");
-    Serial.println(getTimeStampString());
+    // Option 3 using the RTC
+    Serial.println(rtc.getTime());
     previousMillis += interval;
+  }
+
+  // Update time using NTP at same time everyday (getHour(true) outputs 0-23)
+  if (rtc.getHour(true) == NTP_SYNC_HOUR and rtc.getMinute() == NTP_SYNC_MINUTE and rtc.getSecond() == NTP_SYNC_SECOND)
+  {
+    if (!rtcUpdated)
+    {
+      updateAndSyncTime();
+    }
+  }
+  else
+  {
+    rtcUpdated = false;
   }
 }
 
-String getTimeStampString()
+void updateAndSyncTime()
 {
-  time_t rawtime = timeClient.getEpochTime();
-  struct tm *ti;
-  ti = localtime(&rawtime);
-
-  uint16_t year = ti->tm_year + 1900;
-  String yearStr = String(year);
-
-  uint8_t month = ti->tm_mon + 1;
-  String monthStr = month < 10 ? "0" + String(month) : String(month);
-
-  uint8_t day = ti->tm_mday;
-  String dayStr = day < 10 ? "0" + String(day) : String(day);
-
-  uint8_t hours = ti->tm_hour;
-  String hoursStr = hours < 10 ? "0" + String(hours) : String(hours);
-
-  uint8_t minutes = ti->tm_min;
-  String minuteStr = minutes < 10 ? "0" + String(minutes) : String(minutes);
-
-  uint8_t seconds = ti->tm_sec;
-  String secondStr = seconds < 10 ? "0" + String(seconds) : String(seconds);
-
-  return yearStr + "-" + monthStr + "-" + dayStr + " " +
-         hoursStr + ":" + minuteStr + ":" + secondStr;
+  if (timeClient.update())
+  {
+    // successful update
+    Serial.println("Recieved updated time from NTP!");
+    rtc.setTime(timeClient.getEpochTime());
+    rtcUpdated = true;
+  }
+  else
+  {
+    Serial.println("Unable to connect to NTP");
+  }
+}
+String processor(const String &var)
+{
+  // Serial.println(var);
+  if (var == "GPIO_STATE")
+  {
+    if (digitalRead(LED_PIN))
+    {
+      ledState = "ON";
+    }
+    else
+    {
+      ledState = "OFF";
+    }
+    return ledState;
+  }
+  else if (var == "CURRENT_TIME")
+  {
+    return rtc.getTime("%A, %B %d %Y %r");
+  }
+  return String();
 }
