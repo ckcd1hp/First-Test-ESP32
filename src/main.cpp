@@ -8,11 +8,12 @@
 #include <ESP32Time.h>
 #include <DHT.h>
 
+#include "config.h"
+
 #define UTC_OFFSET_IN_SECONDS -36000 // offset from greenwich time (Hawaii is UTC-10)
 #define NTP_SYNC_HOUR 4
 #define NTP_SYNC_MINUTE 0
 #define NTP_SYNC_SECOND 0
-#define CONNECTION_TIMEOUT 10       // seconds
 #define WIFI_RETRY_WAIT_TIME 300000 // 5 minutes in milliseconds
 #define NTP_UPDATE_INTERVAL 1800000 // 30 min in milliseconds (minimum retry time, normally daily)
 
@@ -35,14 +36,10 @@ ESP32Time rtc; // no offset, as that is already added from NTPClient
 bool rtcUpdated = false;
 
 // time interval setup
-int interval = 10000;
+int interval = 900000;
 unsigned long previousMillis = 0;
 unsigned long wifiPrevMillis = 0;
 unsigned long now;
-
-// SSID and password of Wifi connection:
-const char *ssid = "Beast";
-const char *password = "ca9786e7";
 
 AsyncWebServer server(80);
 DHT dht(DHT_PIN, DHT11);
@@ -76,7 +73,7 @@ void setup()
   WiFi.onEvent(WiFiGotIP, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
   WiFi.onEvent(WiFiStationDisconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.mode(WIFI_STA); // station mode: ESP32 connects to access point
-  WiFi.begin(ssid, password);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.println("Connecting to WIFI");
   delay(10000);
   timeClient.begin();
@@ -142,7 +139,7 @@ void loop()
     // ready to connect
     delay(5000); // will attempt to reconnect before disconnect event even fires
     Serial.println("Reconnecting to WiFi");
-    WiFi.begin(ssid, password);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     wifiPrevMillis = now; // reset timer
     readyToConnectWifi = false;
   }
@@ -212,7 +209,7 @@ String processor(const String &var)
   }
   else if (var == "CURRENT_TIME")
   {
-    return rtc.getTime("%A, %B %d %Y %r");
+    return rtc.getTime("%A, %B %d %Y %I:%M %p");
   }
   return String();
 }
