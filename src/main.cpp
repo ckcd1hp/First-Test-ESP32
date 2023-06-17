@@ -10,41 +10,51 @@
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
 #include <ESP32Time.h>
+#include <DHT.h>
 
 #define UTC_OFFSET_IN_SECONDS -36000 // offset from greenwich time (Hawaii is UTC-10)
-#define LED_PIN 2
 #define NTP_SYNC_HOUR 4
 #define NTP_SYNC_MINUTE 0
 #define NTP_SYNC_SECOND 0
 
-String ledState;
+// pin definitons
+#define LED_PIN 2
+#define WATER_PUMP_1_PIN 22
+#define DHT_PIN 23
+
+// function declarations
+void updateAndSyncTime();
+String processor(const String &var);
+
 // Define NTP Client to get time
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", UTC_OFFSET_IN_SECONDS);
 ESP32Time rtc; // no offset, as that is already added from NTPClient
 bool rtcUpdated = false;
 
-// function declarations
-void updateAndSyncTime();
-String processor(const String &var);
+// time interval setup
+int interval = 10000;
+unsigned long previousMillis = 0;
+unsigned long now;
 
 // SSID and password of Wifi connection:
 const char *ssid = "Beast";
 const char *password = "ca9786e7";
 
 AsyncWebServer server(80);
+DHT dht(DHT_PIN, DHT11);
 
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-
-// time interval setup
-int interval = 10000;
-unsigned long previousMillis = 0;
-unsigned long now;
+String ledState;
+bool pumpOn = true;
 
 void setup()
 {
   Serial.begin(115200);
+  // set pinout
   pinMode(LED_PIN, OUTPUT);
+  pinMode(WATER_PUMP_1_PIN, OUTPUT);
+  dht.begin();
 
   // Initialize SPIFFS
   if (!SPIFFS.begin(true))
@@ -109,13 +119,32 @@ void loop()
   now = millis();
   if (now - previousMillis > interval)
   {
-    // Option 3 using the RTC
-    Serial.println(rtc.getTime());
+    // Serial.println(rtc.getTime());
+    // get dht sensor readings
+    float h = dht.readHumidity();
+    float f = dht.readTemperature(true); // true outputs in fahrenheit
+    if (isnan(h) || isnan(f))
+    {
+      Serial.println("Error: Failed to read from DHT sensor!");
+    }
+    else
+    {
+      // Compute heat index in Fahrenheit
+      float hif = dht.computeHeatIndex(f, h);
+      Serial.println((String) "Temperature: " + f + "F");
+      Serial.println((String) "Humidity: " + h + "%");
+      Serial.println((String) "Heat Index: " + hif + "F");
+    }
+
     previousMillis += interval;
   }
 
+  int currentHour = rtc.getHour(true);
+  int currentMin = rtc.getMinute();
+  int currentSec = rtc.getSecond();
+
   // Update time using NTP at same time everyday (getHour(true) outputs 0-23)
-  if (rtc.getHour(true) == NTP_SYNC_HOUR and rtc.getMinute() == NTP_SYNC_MINUTE and rtc.getSecond() == NTP_SYNC_SECOND)
+  if (currentHour == NTP_SYNC_HOUR and currentMin == NTP_SYNC_MINUTE and currentSec == NTP_SYNC_SECOND)
   {
     if (!rtcUpdated)
     {
@@ -126,6 +155,21 @@ void loop()
   {
     rtcUpdated = false;
   }
+
+  // Run water pump 1 from 6am to 6pm continuously.  The other 12 hours, the pump will run for 1 min on the hour
+  /*if (currentHour >= 6 and currentHour <= 18)
+  {
+    digitalWrite(WATER_PUMP_1_PIN, HIGH);
+  }
+  else if (currentMin == 0)
+  {
+    digitalWrite(WATER_PUMP_1_PIN, HIGH);
+  }
+  else
+  {
+    digitalWrite(WATER_PUMP_1_PIN, LOW);
+  }
+  */
 }
 
 void updateAndSyncTime()
