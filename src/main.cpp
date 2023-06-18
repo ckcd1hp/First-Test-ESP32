@@ -28,6 +28,8 @@ void WiFiGotIP(WiFiEvent_t event, WiFiEventInfo_t info);               // on con
 void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info); // on disconnect from Wifi
 void updateAndSyncTime();
 String processor(const String &var);
+unsigned long setInterval(void (*callback)(), unsigned long previousMillis, unsigned long interval);
+void getDhtReadings();
 
 // Define NTP Client to get time
 WiFiUDP ntpUDP;
@@ -37,7 +39,7 @@ bool rtcUpdated = false;
 
 // time interval setup
 int interval = 900000;
-unsigned long previousMillis = 0;
+unsigned long dhtMillisCounter = 0;
 unsigned long wifiPrevMillis = 0;
 unsigned long now;
 
@@ -104,27 +106,7 @@ void setup()
 void loop()
 {
   now = millis();
-  if (now - previousMillis > interval)
-  {
-    // Serial.println(rtc.getTime());
-    // get dht sensor readings
-    float h = dht.readHumidity();
-    float f = dht.readTemperature(true); // true outputs in fahrenheit
-    if (isnan(h) || isnan(f))
-    {
-      Serial.println("Error: Failed to read from DHT sensor!");
-    }
-    else
-    {
-      // Compute heat index in Fahrenheit
-      float hif = dht.computeHeatIndex(f, h);
-      Serial.println((String) "Temperature: " + f + "F");
-      Serial.println((String) "Humidity: " + h + "%");
-      Serial.println((String) "Heat Index: " + hif + "F");
-    }
-
-    previousMillis += interval;
-  }
+  dhtMillisCounter = setInterval(getDhtReadings, dhtMillisCounter, 5000);
   // check counter if connecting to wifi
   if (!readyToConnectWifi)
   {
@@ -241,4 +223,32 @@ void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info)
   Serial.print("WiFi lost connection. Reason: ");
   Serial.println(info.wifi_sta_disconnected.reason);
   WiFi.disconnect(true);
+}
+void getDhtReadings()
+{
+  float h = dht.readHumidity();
+  float f = dht.readTemperature(true); // true outputs in fahrenheit
+  if (isnan(h) || isnan(f))
+  {
+    Serial.println("Error: Failed to read from DHT sensor!");
+  }
+  else
+  {
+    // Compute heat index in Fahrenheit
+    float hif = dht.computeHeatIndex(f, h);
+    Serial.println((String) "Temperature: " + f + "F");
+    Serial.println((String) "Humidity: " + h + "%");
+    Serial.println((String) "Heat Index: " + hif + "F");
+  }
+}
+
+// for calling a function every interval
+unsigned long setInterval(void (*callback)(), unsigned long previousMillis, unsigned long interval)
+{
+  if (millis() - previousMillis >= interval)
+  {
+    previousMillis += interval;
+    callback();
+  }
+  return previousMillis;
 }
