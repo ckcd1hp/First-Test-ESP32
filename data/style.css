@@ -5,9 +5,13 @@ html {
     text-align: center;
 }
 
-h1 {
-    color: #070812;
-    padding: 2vh;
+.topnav {
+    overflow: hidden;
+    background-color: #007bff;
+    color: #ffffff;
+    text-align: center;
+    padding: 10px;
+    margin-bottom: 20px;
 }
 
 .button {

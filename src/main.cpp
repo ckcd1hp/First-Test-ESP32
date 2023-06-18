@@ -38,17 +38,22 @@ ESP32Time rtc; // no offset, as that is already added from NTPClient
 bool rtcUpdated = false;
 
 // time interval setup
-int interval = 900000;
+int dhtInterval = 900000;
 unsigned long dhtMillisCounter = 0;
 unsigned long wifiPrevMillis = 0;
 unsigned long now;
 
+// create AsyncWebServer on port 80
 AsyncWebServer server(80);
+// Create an Event Source on /events
+AsyncEventSource events("/events");
 DHT dht(DHT_PIN, DHT11);
 
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 String ledState;
+float h, f, hif; // humidity, temp in fahrenheit, heat index fahrenheit
 bool pumpOn = true;
+bool pump1Override = false;
 bool readyToConnectWifi = true;
 
 void setup()
@@ -87,6 +92,9 @@ void setup()
   // Route to load style.css file
   server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(SPIFFS, "/style.css", "text/css"); });
+  // Route to load script.js file
+  server.on("/script.js", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(SPIFFS, "/script.js", "text/javascript"); });
 
   // Route to set GPIO to HIGH
   server.on("/led2on", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -100,13 +108,26 @@ void setup()
     digitalWrite(LED_PIN, LOW);    
     request->send(SPIFFS, "/index.html", String(), false, processor); });
 
+  // Handle Web Server Events
+  events.onConnect([](AsyncEventSourceClient *client)
+                   {
+    if(client->lastId()){
+      Serial.printf("Client reconnected! Last message ID that it got is: %u\n", client->lastId());
+    }
+    // send event with message "hello!", id current millis
+    // and set reconnect delay to 1 second
+    client->send("hello!", NULL, millis(), 10000); });
+  server.addHandler(&events);
   server.begin();
+
+  // initial dht reading
+  getDhtReadings();
 }
 
 void loop()
 {
   now = millis();
-  dhtMillisCounter = setInterval(getDhtReadings, dhtMillisCounter, 5000);
+  dhtMillisCounter = setInterval(getDhtReadings, dhtMillisCounter, dhtInterval);
   // check counter if connecting to wifi
   if (!readyToConnectWifi)
   {
@@ -176,7 +197,9 @@ void updateAndSyncTime()
 }
 String processor(const String &var)
 {
-  // Serial.println(var);
+  // get current dht readings to update webpage
+  getDhtReadings();
+
   if (var == "GPIO_STATE")
   {
     if (digitalRead(LED_PIN))
@@ -192,6 +215,18 @@ String processor(const String &var)
   else if (var == "CURRENT_TIME")
   {
     return rtc.getTime("%A, %B %d %Y %I:%M %p");
+  }
+  else if (var == "TEMPERATURE")
+  {
+    return String(f);
+  }
+  else if (var == "HUMIDITY")
+  {
+    return String(h);
+  }
+  else if (var == "HEAT_INDEX")
+  {
+    return String(hif);
   }
   return String();
 }
@@ -226,8 +261,8 @@ void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info)
 }
 void getDhtReadings()
 {
-  float h = dht.readHumidity();
-  float f = dht.readTemperature(true); // true outputs in fahrenheit
+  h = dht.readHumidity();
+  f = dht.readTemperature(true); // true outputs in fahrenheit
   if (isnan(h) || isnan(f))
   {
     Serial.println("Error: Failed to read from DHT sensor!");
@@ -235,10 +270,16 @@ void getDhtReadings()
   else
   {
     // Compute heat index in Fahrenheit
-    float hif = dht.computeHeatIndex(f, h);
+    hif = dht.computeHeatIndex(f, h);
     Serial.println((String) "Temperature: " + f + "F");
     Serial.println((String) "Humidity: " + h + "%");
     Serial.println((String) "Heat Index: " + hif + "F");
+    Serial.println("");
+    // Send Events to the Web Client with the Sensor Readings
+    events.send("ping", NULL, millis());
+    events.send(String(f).c_str(), "temperature", millis());
+    events.send(String(h).c_str(), "humidity", millis());
+    events.send(String(hif).c_str(), "heatIndex", millis());
   }
 }
 
@@ -247,8 +288,8 @@ unsigned long setInterval(void (*callback)(), unsigned long previousMillis, unsi
 {
   if (millis() - previousMillis >= interval)
   {
-    previousMillis += interval;
     callback();
+    previousMillis += interval;
   }
   return previousMillis;
 }

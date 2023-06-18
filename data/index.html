@@ -11,7 +11,10 @@
 </head>
 
 <body>
-    <h2>ESP32 WEB SERVER</h2>
+    <div class="topnav">
+        <h1>NFT WEB SERVER</h1>
+        <p>Hawaii Time: %CURRENT_TIME%</p>
+    </div>
     <div class="content">
         <div class="card-grid">
             <div class="card">
@@ -30,7 +33,20 @@
                 <p>Hawaii Time: %CURRENT_TIME%</p>
             </div>
         </div>
+        <br>
+        <div class="card-grid">
+            <div class="card">
+                <h2>Temperature & Humidity</h2>
+                <p><i class="fas fa-thermometer-half" style="color:#059e8a;"></i> TEMPERATURE</p>
+                <p><span id="temp">%TEMPERATURE%</span> &deg;F</p>
+                <p><i class="fas fa-tint" style="color:#00add6;"></i> HUMIDITY</p>
+                <p><span id="hum">%HUMIDITY%</span> &percnt;</p>
+                <p><i class="fas fa-fire" style="color:#c81919;"></i> HEAT INDEX</p>
+                <p><span id="heat">%HEAT_INDEX%</span> &percnt;</p>
+            </div>
+        </div>
     </div>
+    <script src="script.js"></script>
 </body>
 
 </html>
