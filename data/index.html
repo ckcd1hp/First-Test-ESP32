@@ -14,9 +14,62 @@
     <div class="topnav">
         <h1>NFT WEB SERVER</h1>
         <p>Hawaii Time: %CURRENT_TIME%</p>
+        <p>Last Sync Time: June 19 4:00AM</p>
     </div>
     <div class="content">
         <div class="card-grid">
+    
+            <div class="card">
+                <div class="card-title">
+                    <h3>Water Pump 1 Status</h3>
+                </div>
+                <p id="pumpStatus1">%PUMP_1_STATUS%</p>
+                <p>
+                    <button data-header="Water Pump 1 Override" onclick="openModal(this);" class="button">OVERRIDE</button>
+                    <button class="button button2" onClick="setAuto(this);" data-relay="22">AUTO</button>
+                </p>
+            </div>
+            <div class="card">
+                <div class="card-title">
+                    <h3>Water Pump 2 Status</h3>
+                </div>
+                <p id="pumpStatus2">%PUMP_2_STATUS%</p>
+                <p>
+                    <button class="button" data-header="Water Pump 2 Override" onclick="openModal(this);">OVERRIDE</button>
+                    <button class="button button2" onClick="setAuto(this);" data-relay="21">AUTO</button>
+                </p>
+            </div>
+            <div class="card">
+                <div class="card-title">
+                    <h3>Air Pump Status</h3>
+                </div>
+                <p id="airPumpStatus">%AIR_PUMP_STATUS%</p>
+                <p>
+                    <button class="button" data-header="Air Pump Override" onclick="openModal(this);">OVERIDE</button>
+                    <button class="button button2" onClick="setAuto(this);" data-relay="19">AUTO</button>
+                </p>
+            </div>
+            <div class="card">
+                <div class="card-title">
+                    <h3>Temperature & Humidity</h3>
+                </div>
+                <p><i class="fas fa-thermometer-half" style="color:#059e8a;"></i> TEMPERATURE:
+                    <span id="temp">%TEMPERATURE%</span> &deg;F
+                </p>
+                <p><i class="fas fa-tint" style="color:#00add6;"></i> HUMIDITY:
+                    <span id="hum">%HUMIDITY%</span> &percnt;
+                </p>
+                <p><i class="fas fa-fire" style="color:#c81919;"></i> HEAT INDEX:
+                    <span id="heat">%HEAT_INDEX%</span> &percnt;
+                </p>
+            </div>
+            <div class="card">
+                <div class="card-title">
+                    <h3>Water Level</h3>
+                </div>
+                <p><i class="fas fa-water" style="color:#00add6;"></i> WATER LEVEL</p>
+                <p><span id="temp">%WATER_LEVEL%</span></p>
+            </div>
             <div class="card">
                 <p><i class="fas fa-lightbulb fa-2x" style="color:#c81919;"></i> <strong>GPIO2</strong></p>
                 <p>GPIO state: <strong> %GPIO_STATE%</strong></p>
@@ -26,23 +79,24 @@
                 </p>
             </div>
         </div>
-        <br>
-        <div class="card-grid">
-            <div class="card">
-                <p><i class="fas fa-clock fa-spin"></i><strong>Current Time</strong></p>
-                <p>Hawaii Time: %CURRENT_TIME%</p>
+    </div>
+    <div id="overrideModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close" onclick="closeModal()">&times;</span>
+                <h2 id="modalHeader"></h2>
             </div>
-        </div>
-        <br>
-        <div class="card-grid">
-            <div class="card">
-                <h2>Temperature & Humidity</h2>
-                <p><i class="fas fa-thermometer-half" style="color:#059e8a;"></i> TEMPERATURE</p>
-                <p><span id="temp">%TEMPERATURE%</span> &deg;F</p>
-                <p><i class="fas fa-tint" style="color:#00add6;"></i> HUMIDITY</p>
-                <p><span id="hum">%HUMIDITY%</span> &percnt;</p>
-                <p><i class="fas fa-fire" style="color:#c81919;"></i> HEAT INDEX</p>
-                <p><span id="heat">%HEAT_INDEX%</span> &percnt;</p>
+            <div class="modal-body">
+                <h3>Duration</h3>
+                <div class="slidecontainer">
+                    <input type="range" min="5" max="65" value="5" step="5" class="slider" id="overrideRange">
+                    <p><span id="overrideDuration">5 min</span></p>
+                </div>
+    
+            </div>
+            <div class="modal-footer">
+                <button class="button button2" onclick="setOverride(this);" data-value="1">On</button>
+                <button class="button" onclick="setOverride(this);" data-value="0">Off</button>
             </div>
         </div>
     </div>
