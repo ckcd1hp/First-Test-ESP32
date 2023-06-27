@@ -53,16 +53,15 @@ function setOverride(button) {
   xhr.open("GET", "/override?output=" + output + "&state=" + dataValue + "&time=" + sliderValue, true); 
   xhr.send();
   // update status
-  var status = (dataValue == "1") ? "On" : "Off"
-  var status_string = "Status: " + status;
+  var command = (dataValue == "1") ? "On" : "Off"
   var timeLeft = (sliderValue == "65") ? "Permanent)" : sliderValue + " min)"
-  status_string += " (Override " + timeLeft;
+  command += " (Override " + timeLeft;
   if (currentModal == 1){
-  	document.getElementById("pumpStatus1").innerHTML = status_string;
+  	document.getElementById("pump1Command").innerHTML = command;
   } else if(currentModal == 2){
-  	document.getElementById("pumpStatus2").innerHTML = status_string;
+  	document.getElementById("pump2Command").innerHTML = command;
   } else {
-  	document.getElementById("airPumpStatus").innerHTML = status_string;
+  	document.getElementById("airPumpCommand").innerHTML = command;
   }
   closeModal();
 }
@@ -84,16 +83,13 @@ if (!!window.EventSource) {
       console.log("Events Disconnected");
     }
   }, false);
-
   source.addEventListener('message', function(e) {
     console.log("message", e.data);
   }, false);
-
   source.addEventListener('temperature', function(e) {
     console.log("temperature", e.data);
     document.getElementById("temp").innerHTML = e.data;
   }, false);
-
   source.addEventListener('humidity', function(e) {
     console.log("humidity", e.data);
     document.getElementById("hum").innerHTML = e.data;
@@ -104,14 +100,26 @@ if (!!window.EventSource) {
   }, false);
   source.addEventListener('pump1Status', function(e) {
     console.log("pump1Status", e.data);
-    document.getElementById("pumpStatus1").innerHTML = e.data;
+    document.getElementById("pump1Status").innerHTML = e.data;
   }, false);
   source.addEventListener('pump2Status', function(e) {
     console.log("pump2Status", e.data);
-    document.getElementById("pumpStatus2").innerHTML = e.data;
+    document.getElementById("pump2Status").innerHTML = e.data;
   }, false);
   source.addEventListener('airPumpStatus', function(e) {
     console.log("airPumpStatus", e.data);
     document.getElementById("airPumpStatus").innerHTML = e.data;
+  }, false);
+  source.addEventListener('pump1Command', function(e) {
+    console.log("pump1Command", e.data);
+    document.getElementById("pump1Command").innerHTML = e.data;
+  }, false);
+  source.addEventListener('pump2Command', function(e) {
+    console.log("pump2Command", e.data);
+    document.getElementById("pump2Command").innerHTML = e.data;
+  }, false);
+  source.addEventListener('airPumpCommand', function(e) {
+    console.log("airPumpCommand", e.data);
+    document.getElementById("airPumpCommand").innerHTML = e.data;
   }, false);
 }

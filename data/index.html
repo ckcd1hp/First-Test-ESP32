@@ -14,16 +14,17 @@
     <div class="topnav">
         <h1>NFT WEB SERVER</h1>
         <p>Hawaii Time: %CURRENT_TIME%</p>
-        <p>Last Sync Time: June 19 4:00AM</p>
+        <p>Last Sync Time: %LAST_SYNC_TIME%</p>
     </div>
     <div class="content">
         <div class="card-grid">
     
             <div class="card">
                 <div class="card-title">
-                    <h3>Water Pump 1 Status</h3>
+                    <h3>Water Pump 1</h3>
                 </div>
-                <p id="pumpStatus1">%PUMP_1_STATUS%</p>
+                <p>Command: <span id="pump1Command">%PUMP_1_COMMAND%</span></p>
+                <p>Status: <span id="pump1Status">%PUMP_1_STATUS%</span></p>
                 <p>
                     <button data-header="Water Pump 1 Override" onclick="openModal(this);" class="button">OVERRIDE</button>
                     <button class="button button2" onClick="setAuto(this);" data-relay="22">AUTO</button>
@@ -31,9 +32,10 @@
             </div>
             <div class="card">
                 <div class="card-title">
-                    <h3>Water Pump 2 Status</h3>
+                    <h3>Water Pump 2</h3>
                 </div>
-                <p id="pumpStatus2">%PUMP_2_STATUS%</p>
+                <p>Command: <span id="pump2Command">%PUMP_2_COMMAND%</span></p>
+                <p>Status: <span id="pump2Status">%PUMP_2_STATUS%</span></p>
                 <p>
                     <button class="button" data-header="Water Pump 2 Override" onclick="openModal(this);">OVERRIDE</button>
                     <button class="button button2" onClick="setAuto(this);" data-relay="21">AUTO</button>
@@ -41,9 +43,10 @@
             </div>
             <div class="card">
                 <div class="card-title">
-                    <h3>Air Pump Status</h3>
+                    <h3>Air Pump</h3>
                 </div>
-                <p id="airPumpStatus">%AIR_PUMP_STATUS%</p>
+                <p>Command: <span id="airPumpCommand">%AIR_PUMP_COMMAND%</span></p>
+                <p>Status: <span id="airPumpStatus">%AIR_PUMP_STATUS%</span></p>
                 <p>
                     <button class="button" data-header="Air Pump Override" onclick="openModal(this);">OVERIDE</button>
                     <button class="button button2" onClick="setAuto(this);" data-relay="19">AUTO</button>

@@ -7,6 +7,7 @@
 #include <SPIFFS.h>
 #include <ESP32Time.h>
 #include <DHT.h>
+#include <AsyncElegantOTA.h>
 
 #include "config.h"
 
@@ -39,23 +40,29 @@ void toggleAirPump();                                 // turn air pump on/off
 void overridePump(int pump_pin, int state, int time); // put a pump in override
 void setPumpAuto(int pump_pin);                       //  set a pump back to auto
 void controlPumps(int currentHour, int currentMin);   // control water pumps in auto or override
+void updatePumpStatuses();                            // update web with pump statuses
 
 // Define NTP Client to get time
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", UTC_OFFSET_IN_SECONDS, NTP_UPDATE_INTERVAL);
 ESP32Time rtc; // no offset, as that is already added from NTPClient
 bool rtcUpdated = false;
+String lastNTPSync = "";
 
 // time interval setup
 int dhtInterval = 900000;
 int airPumpInterval = 900000;
-int adcSamplingInterval = 50; // 100 milliseconds means 10 samples in 1 second
+int updatePumpStatusInterval = 10000; // update pump statuses to web server every 10 seconds
+int adcSamplingInterval = 50;         // 50 milliseconds means 20 samples in 1 second
 unsigned long airPumpMillisCounter = 0;
 unsigned long dhtMillisCounter = 0;
 unsigned long wifiPrevMillis = 0;
 unsigned long adcSamplingMillisCounter = 0;
+unsigned long pumpStatusMillisCounter = 0;
 int samplingCounter = 0;
-float samples = 0.0;
+float pump1Samples = 0.0;
+float pump2Samples = 0.0;
+float airPumpSamples = 0.0;
 unsigned long now;
 
 // create AsyncWebServer on port 80
@@ -66,11 +73,12 @@ DHT dht(DHT_PIN, DHT11);
 
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 String ledState;
-float h, f, hif;       // humidity, temp in fahrenheit, heat index fahrenheit
-bool pumpLead = false; // false is pump1 lead, true is pump2 lead
+float h, f, hif; // humidity, temp in fahrenheit, heat index fahrenheit
+bool pump1Command = false;
 bool pump1Override = false;
 bool pump1Status = false;
 unsigned long pump1OverrideTimeEpochEnd = 0; // if pump overriden for 5 min, this will be set to current epoch + 5*60
+bool pump2Command = false;
 bool pump2Override = false;
 bool pump2Status = false;
 unsigned long pump2OverrideTimeEpochEnd = 0; // if pump overriden for 5 min, this will be set to current epoch + 5*60
@@ -80,13 +88,24 @@ bool airPumpStatus = false;
 unsigned long airPumpOverrideTimeEpochEnd = 0; // if pump overriden for 5 min, this will be set to current epoch + 5*60
 float mvPerAmp = 0.185;                        // sensitivity for ACS712 5A current sensor
 bool readyToConnectWifi = true;                // ready to try connecting to wifi
+// GET REQUEST PARAMETERS
 const char *PARAM_OUTPUT = "output";
 const char *PARAM_STATE = "state";
 const char *PARAM_TIME = "time";
 
+// only update status once a min on web server when there is an override timer
 bool pump1StatusUpdated = false;
 bool pump2StatusUpdated = false;
 bool airPumpStatusUpdated = false;
+
+// ALARMS
+bool pump1Alarm = false;
+bool pump2Alarm = false;
+bool airPumpAlarm = false;
+// alarm after 1 minute of command/status mismatch
+unsigned long pump1AlarmTimeEpochEnd = 0;
+unsigned long pump2AlarmTimeEpochEnd = 0;
+unsigned long airPumpAlarmTimeEpochEnd = 0;
 
 void setup()
 {
@@ -143,7 +162,7 @@ void setup()
   server.on("/override", HTTP_GET, [](AsyncWebServerRequest *request)
             {
     int output, state, time;
-    String debug = "";
+    //String debug = "";
     // GET input1 value on <ESP_IP>/override?output=<output>&state=<state&time=<time>
     if (request->hasParam(PARAM_OUTPUT) && request->hasParam(PARAM_STATE) && request->hasParam(PARAM_TIME))
     {
@@ -151,29 +170,29 @@ void setup()
       state = request->getParam(PARAM_STATE)->value().toInt();
       time = request->getParam(PARAM_TIME)->value().toInt();
       overridePump(output, state, time);
-      debug = "Set pin " + String(output) + " to " + (state == 1) ? "On " : "Off " + (time > 60) ? "permanently" : "for " + String(time) + " min"; 
+      //debug = "Set pin " + String(output) + " to " + (state == 1) ? "On " : "Off " + (time > 60) ? "permanently" : "for " + String(time) + " min"; 
     }
     else {
-      debug = "No message sent";
+      //debug = "No message sent";
     }
-    Serial.println(debug);
+    //Serial.println(debug);
     request->send(200, "text/plain", "OK"); });
 
   server.on("/auto", HTTP_GET, [](AsyncWebServerRequest *request)
             {
     int output;
-    String debug = "";
+    //String debug = "";
     // GET input1 value on <ESP_IP>/auto?output=<output>
     if (request->hasParam(PARAM_OUTPUT))
     {
       output = request->getParam(PARAM_OUTPUT)->value().toInt();
       setPumpAuto(output);
-      debug = "Set pin " + String(output) + " to auto"; 
+    //  debug = "Set pin " + String(output) + " to auto"; 
     }
     else {
-      debug = "No message sent";
+     // debug = "No message sent";
     }
-    Serial.println(debug);
+    //Serial.println(debug);
     request->send(200, "text/plain", "OK"); });
 
   // Handle Web Server Events
@@ -186,6 +205,7 @@ void setup()
     // and set reconnect delay to 1 second
     client->send("hello!", NULL, millis(), 10000); });
   server.addHandler(&events);
+  AsyncElegantOTA.begin(&server);
   server.begin();
 
   // initial dht reading
@@ -196,30 +216,52 @@ void loop()
 {
 
   now = millis();
+  // sample current sensors every 50ms
   if (now - adcSamplingMillisCounter >= adcSamplingInterval)
   {
-    samples = samples + analogRead(WATER_PUMP_1_CURRENT);
+    pump1Samples += analogRead(WATER_PUMP_1_CURRENT);
+    pump2Samples += analogRead(WATER_PUMP_2_CURRENT);
+    airPumpSamples += analogRead(AIR_PUMP_CURRENT);
+
+    // increase sample counter
     adcSamplingMillisCounter += adcSamplingInterval;
     samplingCounter++;
-    // Serial.print("samples: ");
-    // Serial.println(samples);
-    // Serial.println(analogRead(WATER_PUMP_1_CURRENT) * (3.3 / 4095));
+    // 50 samples collected in 1 second
     if (samplingCounter >= 50)
     {
-      float avgADC = samples / 50;
-      float voltage = avgADC * 3.3 / 4095.0 - 1.55;
-      float current = voltage * 2 / mvPerAmp;
-      pump1Status = (current > 0.5) ? true : false;
-      Serial.print("Voltage: ");
-      Serial.println(voltage);
-      Serial.print("Current: ");
-      Serial.println(current);
-      Serial.println(pump1Status);
+      float avgPump1ADC = pump1Samples / 50;
+      float pump1Voltage = avgPump1ADC * 3.3 / 4095.0 - 1.55; // 1.55 is voltage reading at 0 current
+      float pump1Current = pump1Voltage * 2 / mvPerAmp;
+      float avgPump2ADC = pump2Samples / 50;
+      float pump2Voltage = avgPump2ADC * 3.3 / 4095.0 - 1.55; // 1.55 is voltage reading at 0 current
+      float pump2Current = pump2Voltage * 2 / mvPerAmp;
+      float avgAirPumpADC = airPumpSamples / 50;
+      float airPumpVoltage = avgAirPumpADC * 3.3 / 4095.0 - 1.55; // 1.55 is voltage reading at 0 current
+      float airPumpCurrent = airPumpVoltage * 2 / mvPerAmp;
+      pump1Status = (pump1Current > 0.5) ? true : false;
+      pump2Status = (pump2Current > 0.5) ? true : false;
+      airPumpStatus = (airPumpCurrent > 0.5) ? true : false;
+      // Current sensor debug calibrations
+      Serial.print("Pump 1 Voltage: ");
+      Serial.println(pump1Voltage);
+      Serial.print("Pump 1 Current: ");
+      Serial.println(pump1Current);
+      Serial.print("Pump 2 Voltage: ");
+      Serial.println(pump2Voltage);
+      Serial.print("Pump 2 Current: ");
+      Serial.println(pump2Current);
+      Serial.print("Air Pump Voltage: ");
+      Serial.println(airPumpVoltage);
+      Serial.print("Air Pump Current: ");
+      Serial.println(airPumpCurrent);
       samplingCounter = 0;
-      samples = 0.0;
+      pump1Samples = 0.0;
+      pump2Samples = 0.0;
+      airPumpSamples = 0.0;
     }
   }
-
+  // update pump status on the web every 10 seconds
+  pumpStatusMillisCounter = setInterval(updatePumpStatuses, pumpStatusMillisCounter, updatePumpStatusInterval);
   // get dht readings every set interval (default 15 min)
   dhtMillisCounter = setInterval(getDhtReadings, dhtMillisCounter, dhtInterval);
   // toggle air pump every set interval (default 15 min)
@@ -271,13 +313,14 @@ void updateAndSyncTime()
     // successful update
     Serial.println("Recieved updated time from NTP!");
     rtc.setTime(timeClient.getEpochTime());
-    Serial.println("RTC: " + rtc.getTime("%A, %B %d %Y %r"));
+    lastNTPSync = rtc.getTime("%A, %B %d %Y %I:%M %p");
+    // Serial.println("RTC: " + lastNTPSync);
     rtcUpdated = true;
   }
   else
   {
     Serial.println("Unable to connect to NTP or already updated within the last 30 minutes");
-    Serial.println("RTC: " + rtc.getTime("%A, %B %d %Y %r"));
+    Serial.println("RTC: " + rtc.getTime("%A, %B %d %Y %I:%M %p"));
   }
 }
 String processor(const String &var)
@@ -298,6 +341,10 @@ String processor(const String &var)
   {
     return rtc.getTime("%A, %B %d %Y %I:%M %p");
   }
+  else if (var == "LAST_SYNC_TIME")
+  {
+    return lastNTPSync;
+  }
   else if (var == "TEMPERATURE")
   {
     // get current dht readings to update webpage
@@ -313,16 +360,16 @@ String processor(const String &var)
   {
     return String(hif);
   }
-  else if (var == "PUMP_1_STATUS")
+  else if (var == "PUMP_1_COMMAND")
   {
-    String status = "Status: ";
+    String command = "";
     if (digitalRead(WATER_PUMP_1_PIN))
     {
-      status += "On ";
+      command = "On ";
     }
     else
     {
-      status += "Off ";
+      command = "Off ";
     }
     if (pump1Override)
     {
@@ -331,20 +378,20 @@ String processor(const String &var)
       {
         timeLeft = String((pump1OverrideTimeEpochEnd - rtc.getEpoch()) / 60); // time left in minutes
       }
-      return status + "(Override " + timeLeft + " min)";
+      return command + "(Override " + timeLeft + " min)";
     }
-    return status + "(Auto)";
+    return command + "(Auto)";
   }
-  else if (var == "PUMP_2_STATUS")
+  else if (var == "PUMP_2_COMMAND")
   {
-    String status = "Status: ";
+    String command = "";
     if (digitalRead(WATER_PUMP_2_PIN))
     {
-      status += "On ";
+      command = "On ";
     }
     else
     {
-      status += "Off ";
+      command = "Off ";
     }
     if (pump2Override)
     {
@@ -353,20 +400,20 @@ String processor(const String &var)
       {
         timeLeft = String((pump2OverrideTimeEpochEnd - rtc.getEpoch()) / 60); // time left in minutes
       }
-      return status + "(Override " + timeLeft + " min)";
+      return command + "(Override " + timeLeft + " min)";
     }
-    return status + "(Auto)";
+    return command + "(Auto)";
   }
-  else if (var == "AIR_PUMP_STATUS")
+  else if (var == "AIR_PUMP_COMMAND")
   {
-    String status = "Status: ";
+    String command = "";
     if (digitalRead(AIR_PUMP_PIN))
     {
-      status += "On ";
+      command = "On ";
     }
     else
     {
-      status += "Off ";
+      command = "Off ";
     }
     if (airPumpOverride)
     {
@@ -375,9 +422,9 @@ String processor(const String &var)
       {
         timeLeft = String((airPumpOverrideTimeEpochEnd - rtc.getEpoch()) / 60); // time left in minutes
       }
-      return status + "(Override " + timeLeft + " min)";
+      return command + "(Override " + timeLeft + " min)";
     }
-    return status + "(Auto)";
+    return command + "(Auto)";
   }
   return String();
 }
@@ -440,8 +487,7 @@ void toggleAirPump()
     if (rtc.getEpoch() >= airPumpOverrideTimeEpochEnd and airPumpOverrideTimeEpochEnd != 0)
     {
       // timer elapsed, back to auto
-      airPumpOverrideTimeEpochEnd = 0;
-      airPumpOverride = false;
+      setPumpAuto(AIR_PUMP_PIN);
     }
     return;
   }
@@ -512,41 +558,67 @@ void overridePump(int pump_pin, int state, int time)
 }
 void setPumpAuto(int pump_pin)
 {
+  int currentHour = rtc.getHour(true); // current time
   if (pump_pin == WATER_PUMP_1_PIN)
   {
+    if (currentHour >= 6 and currentHour < 12)
+    {
+      pump1Command = true;
+      digitalWrite(WATER_PUMP_1_PIN, HIGH);
+    }
+    else
+    {
+      pump1Command = false;
+      digitalWrite(WATER_PUMP_1_PIN, LOW);
+    }
+
     pump1Override = false;
+    pump1OverrideTimeEpochEnd = 0;
     // Send Events to the Web Client with the Sensor Readings
-    String status = "Status: ";
-    String pumpStatus = (pump1Status) ? "On " : "Off ";
-    status += pumpStatus + "(Auto)";
-    events.send(status.c_str(), "pump1Status", millis());
+    String command = (pump1Command) ? " On " : " Off ";
+    String pumpCommand = command + "(Auto)";
+    events.send(pumpCommand.c_str(), "pump1Command", millis());
   }
   else if (pump_pin == WATER_PUMP_2_PIN)
   {
+    if (currentHour >= 12 and currentHour < 18)
+    {
+      pump2Command = true;
+      digitalWrite(WATER_PUMP_2_PIN, HIGH);
+    }
+    else
+    {
+      pump2Command = false;
+      digitalWrite(WATER_PUMP_2_PIN, LOW);
+    }
     pump2Override = false;
+    pump2OverrideTimeEpochEnd = 0;
     // Send Events to the Web Client with the Sensor Readings
-    String status = "Status: ";
-    String pumpStatus = (pump2Status) ? "On " : "Off ";
-    status += pumpStatus + "(Auto)";
-    events.send(status.c_str(), "pump2Status", millis());
+    String command = (pump2Command) ? " On " : " Off ";
+    String pumpCommand = command + "(Auto)";
+    events.send(pumpCommand.c_str(), "pump2Command", millis());
   }
   else
   {
+    airPumpCommand = true;
+    digitalWrite(AIR_PUMP_PIN, HIGH); // switching back to auto will just turn it on, it'll go back to 15 min on/off
     airPumpOverride = false;
+    airPumpOverrideTimeEpochEnd = 0;
     // Send Events to the Web Client with the Sensor Readings
-    String status = "Status: ";
-    String pumpStatus = (airPumpStatus) ? "On " : "Off ";
-    status += pumpStatus + "(Auto)";
-    events.send(status.c_str(), "airPumpStatus", millis());
+    String pumpCommand = "On (Auto)";
+    events.send(pumpCommand.c_str(), "airPumpCommand", millis());
   }
 }
 void controlPumps(int currentHour, int currentMin)
 {
   if (!pump1Override)
   { // auto mode
-    // Run water pump 1 from 6am to 6pm continuously.  The other 12 hours, the pump will run for 1 min on the hour
-    if (currentHour >= 6 and currentHour <= 18)
+    // Run water pump 1 from 6am to 12pm continuously.  The other 12 hours, the pump will run for 1 min on the hour
+    if (currentHour >= 6 and currentHour < 12)
+    {
       digitalWrite(WATER_PUMP_1_PIN, HIGH);
+      pump1Command = true;
+    }
     else if (currentMin == 0)
       digitalWrite(WATER_PUMP_1_PIN, HIGH);
     else
@@ -559,12 +631,12 @@ void controlPumps(int currentHour, int currentMin)
     // update web page every minute
     if (rtc.getSecond() == 0)
     {
-      if (!pump1StatusUpdated)
+      if (!pump1StatusUpdated and pump1OverrideTimeEpochEnd != 0)
       {
         // Send Events to the Web Client with the Sensor Readings
-        String status = (pump1Status) ? "On " : "Off ";
-        String timeLeft = "Status: " + status + "(Override " + String((pump1OverrideTimeEpochEnd - rtc.getEpoch()) / 60) + " min)";
-        events.send(timeLeft.c_str(), "pump1Status", millis());
+        String command = (pump1Command) ? "On " : "Off ";
+        String timeLeft = command + "(Override " + String((pump1OverrideTimeEpochEnd - rtc.getEpoch()) / 60) + " min)";
+        events.send(timeLeft.c_str(), "pump1Command", millis());
         pump1StatusUpdated = true;
       }
     }
@@ -573,22 +645,16 @@ void controlPumps(int currentHour, int currentMin)
     // if pump1OverrideTimeEpochEnd is 0 and pump is in override, then override is permanent
     if (rtc.getEpoch() >= pump1OverrideTimeEpochEnd and pump1OverrideTimeEpochEnd != 0)
     {
-      // timer elapsed, back to auto
-      pump1OverrideTimeEpochEnd = 0;
-      pump1Override = false;
-      // Send Events to the Web Client with the Sensor Readings
-      String status = "Status: " + (pump1Status) ? "On " : "Off ";
-      status += "(Auto)";
-      events.send(status.c_str(), "pump1Status", millis());
+      setPumpAuto(WATER_PUMP_1_PIN);
     }
   }
   /* ----------------------------- WATER PUMP 2 -----------------------------------------*/
   if (!pump2Override)
   { // auto mode
-    // Run water pump 1 from 6am to 6pm continuously.  The other 12 hours, the pump will run for 1 min on the hour
-    if (currentHour >= 6 and currentHour <= 18)
+    // Run water pump 2 from 12pm to 6pm continuously.  The other 12 hours, the pump will run for 1 min on the half hour
+    if (currentHour >= 12 and currentHour < 18)
       digitalWrite(WATER_PUMP_2_PIN, HIGH);
-    else if (currentMin == 0)
+    else if (currentMin == 30)
       digitalWrite(WATER_PUMP_2_PIN, HIGH);
     else
       digitalWrite(WATER_PUMP_2_PIN, LOW);
@@ -600,27 +666,58 @@ void controlPumps(int currentHour, int currentMin)
     // update web page every minute
     if (rtc.getSecond() == 0)
     {
-      if (!pump2StatusUpdated)
+      if (!pump2StatusUpdated and pump2OverrideTimeEpochEnd != 0)
       {
         // Send Events to the Web Client with the Sensor Readings
-        String status = (pump2Status) ? "On " : "Off ";
-        String timeLeft = "Status: " + status + "(Override " + String((pump2OverrideTimeEpochEnd - rtc.getEpoch()) / 60) + " min)";
-        events.send(timeLeft.c_str(), "pump2Status", millis());
+        String command = (pump2Command) ? "On " : "Off ";
+        String timeLeft = command + "(Override " + String((pump2OverrideTimeEpochEnd - rtc.getEpoch()) / 60) + " min)";
+        events.send(timeLeft.c_str(), "pump2Command", millis());
         pump2StatusUpdated = true;
       }
     }
     else
       pump2StatusUpdated = false;
-    // if pump1OverrideTimeEpochEnd is 0 and pump is in override, then override is permanent
+    // if pump2OverrideTimeEpochEnd is 0 and pump is in override, then override is permanent
     if (rtc.getEpoch() >= pump2OverrideTimeEpochEnd and pump2OverrideTimeEpochEnd != 0)
     {
-      // timer elapsed, back to auto
-      pump2OverrideTimeEpochEnd = 0;
-      pump2Override = false;
-      // Send Events to the Web Client with the Sensor Readings
-      String status = "Status: " + (pump2Status) ? "On " : "Off ";
-      status += "(Auto)";
-      events.send(status.c_str(), "pump2Status", millis());
+      setPumpAuto(WATER_PUMP_2_PIN);
     }
+  }
+}
+void updatePumpStatuses()
+{
+  // Send Events to the Web Client with the pump statuses (every 10 seconds)
+  String p1String = (pump1Status) ? "On " : "Off ";
+  String p2String = (pump2Status) ? "On " : "Off ";
+  String airPString = (airPumpStatus) ? "On " : "Off ";
+  events.send(p1String.c_str(), "pump1Status", millis());
+  events.send(p2String.c_str(), "pump2Status", millis());
+  events.send(airPString.c_str(), "airPumpStatus", millis());
+}
+void checkPumpAlarms(int currentMin)
+{
+  if (pump1Command != pump1Status)
+  {
+    if (pump1AlarmTimeEpochEnd == 0)
+    {
+      // first instance of mismatch, start timer if not already in alarm
+      if (!pump1Alarm)
+      {
+        pump1AlarmTimeEpochEnd = rtc.getEpoch() + 60; // 1 minute timer
+      }
+    }
+    else
+    {
+      if (rtc.getEpoch() >= pump1AlarmTimeEpochEnd)
+      {
+        // set alarm
+        pump1Alarm = true;
+        pump1AlarmTimeEpochEnd = 0;
+      }
+    }
+  }
+  else
+  {
+    pump1Alarm = false;
   }
 }
