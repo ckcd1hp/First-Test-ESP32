@@ -72,6 +72,17 @@ function setAuto(button){
   xhr.send();
   closeModal();
 }
+function changeWaterLevelTextColor(){
+  var waterLevel = document.getElementById("waterLevel").innerHTML;
+  if (waterLevel == "Low"){
+    // change document.getElementById("waterLevel") text color to red
+    document.getElementById("waterLevel").style.color = "red";
+  } else if (waterLevel == "Medium"){
+    document.getElementById("waterLevel").style.color = "orange";
+  } else {
+    document.getElementById("waterLevel").style.color = "green";
+  }
+}
 
 if (!!window.EventSource) {
   var source = new EventSource('/events');
@@ -121,5 +132,10 @@ if (!!window.EventSource) {
   source.addEventListener('airPumpCommand', function(e) {
     console.log("airPumpCommand", e.data);
     document.getElementById("airPumpCommand").innerHTML = e.data;
+  }, false);
+  source.addEventListener('waterLevel', function(e) {
+    console.log("waterLevel", e.data);
+    document.getElementById("waterLevel").innerHTML = e.data;
+    changeWaterLevelTextColor();
   }, false);
 }
