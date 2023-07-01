@@ -1,3 +1,9 @@
+:root {
+    --green: #72ff7d;
+    --red: #ff4242;
+    --yellow: #ffda72;
+    --blue: #42e5ff;
+}
 html {
     font-family: Arial;
     display: inline-block;
@@ -54,6 +60,11 @@ html {
     font-size: 1.2rem;
     font-weight: bold;
     color: #034078
+}
+.status-p {
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* The Modal (background) */
@@ -124,7 +135,7 @@ html {
 }
 
 .slider {
-    -webkit-appearance: none;
+    /*-webkit-appearance: none; */
     width: 100%;
     height: 15px;
     border-radius: 5px;
@@ -151,4 +162,55 @@ html {
     border-radius: 50%;
     background: #04AA6D;
     cursor: pointer;
+}
+.status {
+    position: relative;
+    display: inline-block;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    margin: 10px;
+
+    &.online,
+    &.online:before {
+        background: var(--green);
+    }
+
+    &.offline {
+        background: var(--red);
+    }
+
+    &.invisible,
+    &.invisible:before {
+        background: var(--blue);;
+    }
+
+    &.idle,
+    &.idle:before {
+        background: var(--yellow);
+    }
+
+    &:before {
+        content: '';
+        display: block;
+        position: absolute;
+        left: -5px;
+        top: -5px;
+        width: 25px;
+        height: 25px;
+        border-radius: 50%;
+        animation: pulse 1.5s infinite ease-in;
+    }
+}
+
+@keyframes pulse {
+    from {
+        transform: scale(0.5);
+        opacity: 1;
+    }
+
+    to {
+        transform: scale(1.5);
+        opacity: 0;
+    }
 }

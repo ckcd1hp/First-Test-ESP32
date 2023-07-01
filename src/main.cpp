@@ -43,6 +43,7 @@ void toggleAirPump();                                 // turn air pump on/off
 void overridePump(int pump_pin, int state, int time); // put a pump in override
 void setPumpAuto(int pump_pin);                       //  set a pump back to auto
 void controlPumps(int currentHour, int currentMin);   // control water pumps in auto or override
+void checkPumpAlarms();                               // check if pump status doesn't match command
 void updatePumpStatuses();                            // update web with pump statuses
 void getWaterLevel();                                 // get water level from ultrasonic sensor
 
@@ -243,12 +244,12 @@ void loop()
     // increase sample counter
     adcSamplingMillisCounter += adcSamplingInterval;
     samplingCounter++;
-    // 50 samples collected in 1 second
+    // 50 samples = 2.5s
     if (samplingCounter >= 50)
     {
       float avgPump1ADC = pump1Samples / 50;
-      float pump1Voltage = avgPump1ADC * 3.3 / 4095.0 - 1.55; // 1.55 is voltage reading at 0 current
-      float pump1Current = pump1Voltage * 2 / mvPerAmp;
+      float pump1Voltage = (avgPump1ADC * (3.31 / 4095.0)) - 1.52; // 1.55 is voltage reading at 0 current
+      float pump1Current = 2 * pump1Voltage / mvPerAmp;
       float avgPump2ADC = pump2Samples / 50;
       float pump2Voltage = avgPump2ADC * 3.3 / 4095.0 - 1.55; // 1.55 is voltage reading at 0 current
       float pump2Current = pump2Voltage * 2 / mvPerAmp;
@@ -259,10 +260,11 @@ void loop()
       pump2Status = (pump2Current > 0.5) ? true : false;
       airPumpStatus = (airPumpCurrent > 0.5) ? true : false;
       // Current sensor debug calibrations
+      // Serial.println(avgPump1ADC);
       // Serial.print("Pump 1 Voltage: ");
-      // Serial.println(pump1Voltage);
+      // Serial.println(pump1Voltage, 3);
       // Serial.print("Pump 1 Current: ");
-      // Serial.println(pump1Current);
+      // Serial.println(pump1Current, 3);
       // Serial.print("Pump 2 Voltage: ");
       // Serial.println(pump2Voltage);
       // Serial.print("Pump 2 Current: ");
@@ -323,6 +325,8 @@ void loop()
   }
   // controls pumps (auto vs override)
   controlPumps(currentHour, currentMin);
+  // check pump alarm
+  checkPumpAlarms();
 }
 
 void updateAndSyncTime()
@@ -378,11 +382,6 @@ String processor(const String &var)
   else if (var == "HEAT_INDEX")
   {
     return String(hif);
-  }
-  else if (var == "WATER_LEVEL")
-  {
-    return String((waterLevel == W_LOW) ? "Low" : (waterLevel == W_MED) ? "Medium"
-                                                                        : "High");
   }
   else if (var == "PUMP_1_COMMAND")
   {
@@ -542,6 +541,7 @@ void overridePump(int pump_pin, int state, int time)
   if (pump_pin == WATER_PUMP_1_PIN)
   {
     pump1Override = true;
+    pump1Command = state ? true : false;
     if (time > 60)
     {
       // permanent override
@@ -555,6 +555,7 @@ void overridePump(int pump_pin, int state, int time)
   else if (pump_pin == WATER_PUMP_2_PIN)
   {
     pump2Override = true;
+    pump2Command = state ? true : false;
     if (time > 60)
     {
       // permanent override
@@ -568,6 +569,7 @@ void overridePump(int pump_pin, int state, int time)
   else
   {
     airPumpOverride = true;
+    airPumpCommand = state ? true : false;
     if (time > 60)
     {
       // permanent override
@@ -677,7 +679,10 @@ void controlPumps(int currentHour, int currentMin)
   { // auto mode
     // Run water pump 2 from 12pm to 6pm continuously.  The other 12 hours, the pump will run for 1 min on the half hour
     if (currentHour >= 12 and currentHour < 18)
+    {
       digitalWrite(WATER_PUMP_2_PIN, HIGH);
+      pump2Command = true;
+    }
     else if (currentMin == 30)
       digitalWrite(WATER_PUMP_2_PIN, HIGH);
     else
@@ -711,14 +716,14 @@ void controlPumps(int currentHour, int currentMin)
 void updatePumpStatuses()
 {
   // Send Events to the Web Client with the pump statuses (every 10 seconds)
-  String p1String = (pump1Status) ? "On " : "Off ";
-  String p2String = (pump2Status) ? "On " : "Off ";
-  String airPString = (airPumpStatus) ? "On " : "Off ";
+  String p1String = (pump1Status) ? "<span class = \"status online\"></ span>" : "<span class=\" status offline \"></span> ";
+  String p2String = (pump2Status) ? "<span class = \"status online\"></ span>" : "<span class=\" status offline \"></span> ";
+  String airPString = (airPumpStatus) ? "<span class = \"status online\"></ span>" : "<span class=\" status offline \"></span> ";
   events.send(p1String.c_str(), "pump1Status", millis());
   events.send(p2String.c_str(), "pump2Status", millis());
   events.send(airPString.c_str(), "airPumpStatus", millis());
 }
-void checkPumpAlarms(int currentMin)
+void checkPumpAlarms()
 {
   if (pump1Command != pump1Status)
   {
@@ -728,6 +733,7 @@ void checkPumpAlarms(int currentMin)
       if (!pump1Alarm)
       {
         pump1AlarmTimeEpochEnd = rtc.getEpoch() + 60; // 1 minute timer
+        Serial.println("Starting pump1 alarm timer");
       }
     }
     else
@@ -737,12 +743,100 @@ void checkPumpAlarms(int currentMin)
         // set alarm
         pump1Alarm = true;
         pump1AlarmTimeEpochEnd = 0;
+        String p1Alarm = "<i class = \"fas fa-bell\" style = \"color:#c81919;\"></ i> Water Pump 1";
+        events.send(p1Alarm.c_str(), "waterPump1Header", millis());
+        Serial.println("Pump1 alarm active");
       }
     }
   }
   else
   {
-    pump1Alarm = false;
+    // reset alarm
+    // as soon as status matches, clear timer
+    pump1AlarmTimeEpochEnd = 0;
+    if (pump1Alarm)
+    {
+      pump1Alarm = false;
+      String p1 = "Water Pump 1";
+      events.send(p1.c_str(), "waterPump1Header", millis());
+      Serial.println("Pump1 alarm cleared");
+    }
+  }
+  // check pump2
+  if (pump2Command != pump2Status)
+  {
+    if (pump2AlarmTimeEpochEnd == 0)
+    {
+      // first instance of mismatch, start timer if not already in alarm
+      if (!pump2Alarm)
+      {
+        pump2AlarmTimeEpochEnd = rtc.getEpoch() + 60; // 1 minute timer
+        Serial.println("Starting pump2 alarm timer");
+      }
+    }
+    else
+    {
+      if (rtc.getEpoch() >= pump2AlarmTimeEpochEnd)
+      {
+        // set alarm
+        pump2Alarm = true;
+        pump2AlarmTimeEpochEnd = 0;
+        String p2Alarm = "<i class = \"fas fa-bell\" style = \"color:#c81919;\"></ i> Water Pump 2";
+        events.send(p2Alarm.c_str(), "waterPump2Header", millis());
+        Serial.println("Pump2 alarm active");
+      }
+    }
+  }
+  else
+  {
+    // reset alarm
+    // as soon as status matches, clear timer
+    pump2AlarmTimeEpochEnd = 0;
+    if (pump2Alarm)
+    {
+      pump2Alarm = false;
+      String p2 = "Water Pump 2";
+      events.send(p2.c_str(), "waterPump2Header", millis());
+      Serial.println("Pump2 alarm cleared");
+    }
+  }
+  // check air pump
+  if (airPumpCommand != airPumpStatus)
+  {
+    if (airPumpAlarmTimeEpochEnd == 0)
+    {
+      // first instance of mismatch, start timer if not already in alarm
+      if (!airPumpAlarm)
+      {
+        airPumpAlarmTimeEpochEnd = rtc.getEpoch() + 60; // 1 minute timer
+        Serial.println("Starting air pump alarm timer");
+      }
+    }
+    else
+    {
+      if (rtc.getEpoch() >= airPumpAlarmTimeEpochEnd)
+      {
+        // set alarm
+        airPumpAlarm = true;
+        airPumpAlarmTimeEpochEnd = 0;
+        String airPumpAlarm = "<i class = \"fas fa-bell\" style = \"color:#c81919;\"></ i> Air Pump";
+        events.send(airPumpAlarm.c_str(), "airPumpHeader", millis());
+        Serial.println("Air pump alarm active");
+      }
+    }
+  }
+  else
+  {
+    // reset alarm
+    // as soon as status matches, clear timer
+    airPumpAlarmTimeEpochEnd = 0;
+    if (airPumpAlarm)
+    {
+      airPumpAlarm = false;
+      String p = "Air Pump";
+      events.send(p.c_str(), "airPumpHeader", millis());
+      Serial.println("Air Pump alarm cleared");
+    }
   }
 }
 void getWaterLevel()
@@ -755,10 +849,6 @@ void getWaterLevel()
   digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
   duration = pulseIn(ULTRASONIC_ECHO_PIN, HIGH);
   distanceCm = duration * SOUND_SPEED / 2;
-  // print distance to serial monitor
-  Serial.print("Distance: ");
-  Serial.print(distanceCm);
-  Serial.println(" cm");
   if (distanceCm > 20)
   {
     waterLevel = W_LOW;

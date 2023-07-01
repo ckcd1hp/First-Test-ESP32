@@ -138,4 +138,13 @@ if (!!window.EventSource) {
     document.getElementById("waterLevel").innerHTML = e.data;
     changeWaterLevelTextColor();
   }, false);
+  source.addEventListener('waterPump1Header', function(e) {
+    document.getElementById("waterPump1Header").innerHTML = e.data;
+  }, false);
+  source.addEventListener('waterPump2Header', function(e) {
+    document.getElementById("waterPump2Header").innerHTML = e.data;
+  }, false);
+  source.addEventListener('airPumpHeader', function(e) {
+    document.getElementById("airPumpHeader").innerHTML = e.data;
+  }, false);
 }

@@ -13,7 +13,7 @@
 <body>
     <div class="topnav">
         <h1>NFT WEB SERVER</h1>
-        <!--><p>Hawaii Time: %CURRENT_TIME%</p><!-->
+        <!--   <p>Hawaii Time: %CURRENT_TIME%</p>     -->
         <p>Last Sync Time: %LAST_SYNC_TIME%</p>
     </div>
     <div class="content">
@@ -21,10 +21,10 @@
     
             <div class="card">
                 <div class="card-title">
-                    <h3>Water Pump 1</h3>
+                    <h3 id="waterPump1Header">Water Pump 1</h3>
                 </div>
                 <p>Command: <span id="pump1Command">%PUMP_1_COMMAND%</span></p>
-                <p>Status: <span id="pump1Status">%PUMP_1_STATUS%</span></p>
+                <p class="status-p">Status: <span id="pump1Status">Checking...</span></p>
                 <p>
                     <button data-header="Water Pump 1 Override" onclick="openModal(this);" class="button">OVERRIDE</button>
                     <button class="button button2" onClick="setAuto(this);" data-relay="22">AUTO</button>
@@ -32,10 +32,10 @@
             </div>
             <div class="card">
                 <div class="card-title">
-                    <h3>Water Pump 2</h3>
+                    <h3 id="waterPump2Header">Water Pump 2</h3>
                 </div>
                 <p>Command: <span id="pump2Command">%PUMP_2_COMMAND%</span></p>
-                <p>Status: <span id="pump2Status">%PUMP_2_STATUS%</span></p>
+                <p class="status-p">Status: <span id="pump2Status">Checking...</span></p>
                 <p>
                     <button class="button" data-header="Water Pump 2 Override" onclick="openModal(this);">OVERRIDE</button>
                     <button class="button button2" onClick="setAuto(this);" data-relay="21">AUTO</button>
@@ -43,10 +43,10 @@
             </div>
             <div class="card">
                 <div class="card-title">
-                    <h3>Air Pump</h3>
+                    <h3 id="airPumpHeader">Air Pump</h3>
                 </div>
                 <p>Command: <span id="airPumpCommand">%AIR_PUMP_COMMAND%</span></p>
-                <p>Status: <span id="airPumpStatus">%AIR_PUMP_STATUS%</span></p>
+                <p class="status-p">Status: <span id="airPumpStatus">Checking...</span></p>
                 <p>
                     <button class="button" data-header="Air Pump Override" onclick="openModal(this);">OVERIDE</button>
                     <button class="button button2" onClick="setAuto(this);" data-relay="19">AUTO</button>
@@ -56,13 +56,13 @@
                 <div class="card-title">
                     <h3>Temperature & Humidity</h3>
                 </div>
-                <p><i class="fas fa-thermometer-half" style="color:#059e8a;"></i> TEMPERATURE:
+                <p><i class="fas fa-thermometer-half" style="color:#059e8a;"></i> Temperature:
                     <span id="temp">%TEMPERATURE%</span> &deg;F
                 </p>
-                <p><i class="fas fa-tint" style="color:#00add6;"></i> HUMIDITY:
+                <p><i class="fas fa-tint" style="color:#00add6;"></i> Humidity:
                     <span id="hum">%HUMIDITY%</span> &percnt;
                 </p>
-                <p><i class="fas fa-fire" style="color:#c81919;"></i> HEAT INDEX:
+                <p><i class="fas fa-fire" style="color:#c81919;"></i> Heat Index:
                     <span id="heat">%HEAT_INDEX%</span> &percnt;
                 </p>
             </div>
@@ -70,7 +70,7 @@
                 <div class="card-title">
                     <h3> <i class="fas fa-water" style="color:#00add6;"></i>  Water Level</h3>
                 </div>
-                <h1><span id="waterLevel">%WATER_LEVEL%</span></h1>
+                <h1><span id="waterLevel">Checking ...</span></h1>
             </div>
             <div class="card">
                 <p><i class="fas fa-lightbulb fa-2x" style="color:#c81919;"></i> <strong>GPIO2</strong></p>
