@@ -32,20 +32,20 @@
 #define ULTRASONIC_ECHO_PIN 18
 
 // function declarations
-void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info);    //
-void WiFiGotIP(WiFiEvent_t event, WiFiEventInfo_t info);               // on connect
-void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info); // on disconnect from Wifi
-void updateAndSyncTime();
-String processor(const String &var);
-unsigned long setInterval(void (*callback)(), unsigned long previousMillis, unsigned long interval);
-void getDhtReadings();                                // get temp and humidity readings from dht sensor
-void toggleAirPump();                                 // turn air pump on/off
-void overridePump(int pump_pin, int state, int time); // put a pump in override
-void setPumpAuto(int pump_pin);                       //  set a pump back to auto
-void controlPumps(int currentHour, int currentMin);   // control water pumps in auto or override
-void checkPumpAlarms();                               // check if pump status doesn't match command
-void updatePumpStatuses();                            // update web with pump statuses
-void getWaterLevel();                                 // get water level from ultrasonic sensor
+void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info);                                  // on connect to Wifi
+void WiFiGotIP(WiFiEvent_t event, WiFiEventInfo_t info);                                             // on IP received from Wifi
+void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info);                               // on disconnect from Wifi
+void updateAndSyncTime();                                                                            // update time from NTP server and sync to RTC
+String processor(const String &var);                                                                 // update web page with variables
+unsigned long setInterval(void (*callback)(), unsigned long previousMillis, unsigned long interval); // run function at interval
+void getDhtReadings();                                                                               // get temp and humidity readings from dht sensor
+void toggleAirPump();                                                                                // turn air pump on/off
+void overridePump(int pump_pin, int state, int time);                                                // put a pump in override
+void setPumpAuto(int pump_pin);                                                                      //  set a pump back to auto
+void controlPumps(int currentHour, int currentMin);                                                  // control water pumps in auto or override
+void checkPumpAlarms();                                                                              // check if pump status doesn't match command
+void updatePumpStatuses();                                                                           // update web with pump statuses
+void getWaterLevel();                                                                                // get water level from ultrasonic sensor
 
 // Define NTP Client to get time
 WiFiUDP ntpUDP;
@@ -87,7 +87,6 @@ AsyncWebServer server(80);
 AsyncEventSource events("/events");
 DHT dht(DHT_PIN, DHT11);
 
-char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 String ledState;
 float h, f, hif; // humidity, temp in fahrenheit, heat index fahrenheit
 bool pump1Command = false;
@@ -130,8 +129,12 @@ void setup()
   // set pinout
   pinMode(LED_PIN, OUTPUT);
   pinMode(WATER_PUMP_1_PIN, OUTPUT);
+  pinMode(WATER_PUMP_2_PIN, OUTPUT);
+  pinMode(AIR_PUMP_PIN, OUTPUT);
   pinMode(ULTRASONIC_TRIG_PIN, OUTPUT);
   pinMode(ULTRASONIC_ECHO_PIN, INPUT);
+  // water pump current pins are input only (34 and 35) and don't need to be set
+  pinMode(AIR_PUMP_CURRENT, INPUT);
   dht.begin();
 
   // Initialize SPIFFS
@@ -335,6 +338,7 @@ void updateAndSyncTime()
   {
     // successful update
     Serial.println("Recieved updated time from NTP!");
+    // set RTC time
     rtc.setTime(timeClient.getEpochTime());
     lastNTPSync = rtc.getTime("%A, %B %d %Y %I:%M %p");
     // Serial.println("RTC: " + lastNTPSync);
@@ -342,6 +346,7 @@ void updateAndSyncTime()
   }
   else
   {
+    // unsuccessful update, display current unsynced RTC time
     Serial.println("Unable to connect to NTP or already updated within the last 30 minutes");
     Serial.println("RTC: " + rtc.getTime("%A, %B %d %Y %I:%M %p"));
   }
@@ -396,12 +401,12 @@ String processor(const String &var)
     }
     if (pump1Override)
     {
-      String timeLeft = "Permanent";
+      String timeLeft = "Permanent)";
       if (pump1OverrideTimeEpochEnd > 0)
       {
-        timeLeft = String((pump1OverrideTimeEpochEnd - rtc.getEpoch()) / 60); // time left in minutes
+        timeLeft = String((pump1OverrideTimeEpochEnd - rtc.getEpoch()) / 60) + " min)"; // time left in minutes
       }
-      return command + "(Override " + timeLeft + " min)";
+      return command + "(Override " + timeLeft;
     }
     return command + "(Auto)";
   }
@@ -418,12 +423,12 @@ String processor(const String &var)
     }
     if (pump2Override)
     {
-      String timeLeft = "Permanent";
+      String timeLeft = "Permanent)";
       if (pump2OverrideTimeEpochEnd > 0)
       {
-        timeLeft = String((pump2OverrideTimeEpochEnd - rtc.getEpoch()) / 60); // time left in minutes
+        timeLeft = String((pump2OverrideTimeEpochEnd - rtc.getEpoch()) / 60) + " min)"; // time left in minutes
       }
-      return command + "(Override " + timeLeft + " min)";
+      return command + "(Override " + timeLeft;
     }
     return command + "(Auto)";
   }
@@ -440,12 +445,12 @@ String processor(const String &var)
     }
     if (airPumpOverride)
     {
-      String timeLeft = "Permanent";
+      String timeLeft = "Permanent)";
       if (airPumpOverrideTimeEpochEnd > 0)
       {
-        timeLeft = String((airPumpOverrideTimeEpochEnd - rtc.getEpoch()) / 60); // time left in minutes
+        timeLeft = String((airPumpOverrideTimeEpochEnd - rtc.getEpoch()) / 60) + " min)"; // time left in minutes
       }
-      return command + "(Override " + timeLeft + " min)";
+      return command + "(Override " + timeLeft;
     }
     return command + "(Auto)";
   }
@@ -644,6 +649,17 @@ void controlPumps(int currentHour, int currentMin)
     {
       digitalWrite(WATER_PUMP_1_PIN, HIGH);
       pump1Command = true;
+      if (pump1Alarm)
+      {
+        // pump1 is in alarm mode, run pump2
+        digitalWrite(WATER_PUMP_2_PIN, HIGH);
+        pump2Command = true;
+      }
+      else
+      {
+        digitalWrite(WATER_PUMP_2_PIN, LOW);
+        pump2Command = false;
+      }
     }
     else if (currentMin == 0)
       digitalWrite(WATER_PUMP_1_PIN, HIGH);
