@@ -1,9 +1,7 @@
 # NFT-ESP32
 This project uses an ESP32 microcontroller to drive a Nutrient Film Technique (NFT) hydroponics garden.
 Features:
-1. 2 Water pumps - One pump will run from 6am to 12 pm continuously. THe second will run from 12pm to 6pm.  After that, the first pump will run every hour for 1 minute.  The second pump will run every
-  half hour for 1 minute.  Statuses are monitored via current sensors, so if one fails, the other will run instead and an alarm will be generated.  Currently, an alarm is generated on the webpage, but
-  will be updated to send a phone notification later.
+1. 2 Water pumps - One pump will run from 6am to 12 pm continuously. The second will run from 12pm to 6pm.  After that, the first pump will run every hour on the hour for 1 minute.  The second pump will run every hour on the half hour for 1 minute.  Statuses are monitored via current sensors, so if one fails, the other will run instead and an alarm will be generated.  Currently, an alarm is generated on the webpage, but will be updated to send a phone notification later.
 2. 1 Air pump - Will run on a 24/7 schedule 15 min on, 15 min off.  Also monitored by current sensor and will generate an alarm on the web server.
 3. DHT11 Temp and Humidity Sensor - Monitor temp and humidity of nearby area or enclosure temps.  Will generate an alarm on web server for temps above 90F.
 4. HC-SR04 Ultrasonic Sensor - Will monitor water levels of reservoir.  Displays low, medium, or high on web server.
@@ -16,6 +14,12 @@ Within the src folder, create a file config.h and create two definitions for you
 
 #define WIFI_SSID "xxxxxxx"
 #define WIFI_PASSWORD "xxxxxx"
+
+Loading code to ESP32
+1. Use Visual Studio Code with extension PlatformIO.
+2. On the left tab, click on the alien icon.  Under PROJECT TASKS -> esp-wrover-kit -> Platform -> Click Build FileSystem Image.  This flashes the web server files to the SPIFFS (SPI Flash File Storage).
+3. Click Upload Filesystem Image
+4. View -> Command Palette -> PlatformIO: Upload and Monitor or just PlatformIO: Upload if you don't want to see serial monitor debug statements
 
 Modifications:  This code can be easily modified to suit your purposes!
 1. Water pump schedule - Change the function **controlPumps**
