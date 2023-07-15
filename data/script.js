@@ -134,7 +134,6 @@ if (!!window.EventSource) {
     document.getElementById("airPumpCommand").innerHTML = e.data;
   }, false);
   source.addEventListener('waterLevel', function(e) {
-    console.log("waterLevel", e.data);
     document.getElementById("waterLevel").innerHTML = e.data;
     changeWaterLevelTextColor();
   }, false);

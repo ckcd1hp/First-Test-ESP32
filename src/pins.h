@@ -1,0 +1,11 @@
+// pin definitons
+#define LED_PIN 2
+#define WATER_PUMP_1_PIN 22
+#define WATER_PUMP_2_PIN 21
+#define AIR_PUMP_PIN 19
+#define DHT_PIN 23
+#define WATER_PUMP_1_CURRENT 34
+#define WATER_PUMP_2_CURRENT 35
+#define AIR_PUMP_CURRENT 32
+#define ULTRASONIC_TRIG_PIN 5
+#define ULTRASONIC_ECHO_PIN 18

@@ -10,6 +10,8 @@
 #include <AsyncElegantOTA.h>
 
 #include "config.h"
+#include "pins.h"
+#include "waterLevel.h"
 
 #define UTC_OFFSET_IN_SECONDS -36000 // offset from greenwich time (Hawaii is UTC-10)
 #define NTP_SYNC_HOUR 4
@@ -18,18 +20,6 @@
 #define WIFI_RETRY_WAIT_TIME 300000 // 5 minutes in milliseconds
 #define NTP_UPDATE_INTERVAL 1800000 // 30 min in milliseconds (minimum retry time, normally daily)
 #define SOUND_SPEED 0.0343          // cm/microsecond
-
-// pin definitons
-#define LED_PIN 2
-#define WATER_PUMP_1_PIN 22
-#define WATER_PUMP_2_PIN 21
-#define AIR_PUMP_PIN 19
-#define DHT_PIN 23
-#define WATER_PUMP_1_CURRENT 34
-#define WATER_PUMP_2_CURRENT 35
-#define AIR_PUMP_CURRENT 32
-#define ULTRASONIC_TRIG_PIN 5
-#define ULTRASONIC_ECHO_PIN 18
 
 // function declarations
 void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info);                                  // on connect to Wifi
@@ -45,7 +35,6 @@ void setPumpAuto(int pump_pin);                                                 
 void controlPumps(int currentHour, int currentMin);                                                  // control water pumps in auto or override
 void checkPumpAlarms();                                                                              // check if pump status doesn't match command
 void updatePumpStatuses();                                                                           // update web with pump statuses
-void getWaterLevel();                                                                                // get water level from ultrasonic sensor
 
 // Define NTP Client to get time
 WiFiUDP ntpUDP;
@@ -73,13 +62,6 @@ float airPumpSamples = 0.0;
 unsigned long now;
 long duration;    // time for sound to travel from sensor to water and back
 float distanceCm; // distance in cm from sensor to water
-enum WaterLevel
-{
-  W_LOW,
-  W_MED,
-  W_HIGH
-};
-WaterLevel waterLevel = W_LOW;
 
 // create AsyncWebServer on port 80
 AsyncWebServer server(80);
@@ -131,11 +113,11 @@ void setup()
   pinMode(WATER_PUMP_1_PIN, OUTPUT);
   pinMode(WATER_PUMP_2_PIN, OUTPUT);
   pinMode(AIR_PUMP_PIN, OUTPUT);
-  pinMode(ULTRASONIC_TRIG_PIN, OUTPUT);
-  pinMode(ULTRASONIC_ECHO_PIN, INPUT);
   // water pump current pins are input only (34 and 35) and don't need to be set
   pinMode(AIR_PUMP_CURRENT, INPUT);
   dht.begin();
+  ultrasonicSensor.begin();
+  // ultrasonicSensor.start();
 
   // Initialize SPIFFS
   if (!SPIFFS.begin(true))
@@ -235,7 +217,11 @@ void setup()
 
 void loop()
 {
-
+  // check if ultrasonic sensor has distance reading
+  if (ultrasonicSensor.isFinished())
+  {
+    displayWaterLevel(ultrasonicSensor.getRange());
+  }
   now = millis();
   // sample current sensors every 50ms
   if (now - adcSamplingMillisCounter >= adcSamplingInterval)
@@ -289,7 +275,7 @@ void loop()
   // toggle air pump every set interval (default 15 min)
   airPumpMillisCounter = setInterval(toggleAirPump, airPumpMillisCounter, airPumpInterval);
   // get water level every set interval (default 15 min)
-  waterLevelMillisCounter = setInterval(getWaterLevel, waterLevelMillisCounter, waterLevelInterval);
+  waterLevelMillisCounter = setInterval(checkWaterLevel, waterLevelMillisCounter, waterLevelInterval);
 
   // check counter if connecting to wifi
   if (!readyToConnectWifi)
@@ -387,6 +373,11 @@ String processor(const String &var)
   else if (var == "HEAT_INDEX")
   {
     return String(hif);
+  }
+  else if (var == "WATER_LEVEL")
+  {
+    checkWaterLevel();
+    return ("Checking...");
   }
   else if (var == "PUMP_1_COMMAND")
   {
@@ -854,30 +845,4 @@ void checkPumpAlarms()
       Serial.println("Air Pump alarm cleared");
     }
   }
-}
-void getWaterLevel()
-{
-  // read ultrasonic sound sensor and output distance
-  digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(ULTRASONIC_TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
-  duration = pulseIn(ULTRASONIC_ECHO_PIN, HIGH);
-  distanceCm = duration * SOUND_SPEED / 2;
-  if (distanceCm > 20)
-  {
-    waterLevel = W_LOW;
-  }
-  else if (distanceCm > 10)
-  {
-    waterLevel = W_MED;
-  }
-  else
-  {
-    waterLevel = W_HIGH;
-  }
-  String waterLevelString = (waterLevel == W_LOW) ? "Low" : (waterLevel == W_MED) ? "Medium"
-                                                                                  : "High";
-  events.send(waterLevelString.c_str(), "waterLevel", millis());
 }
