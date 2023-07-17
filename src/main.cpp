@@ -637,30 +637,15 @@ void controlPumps(int currentHour, int currentMin)
   { // auto mode
     // Run water pump 1 from 6am to 12pm continuously.  The other 12 hours, the pump will run for 1 min on the hour
     if (currentHour >= 6 and currentHour < 12)
-    {
-      digitalWrite(WATER_PUMP_1_PIN, HIGH);
       pump1Command = true;
-      if (pump1Alarm)
-      {
-        // pump1 is in alarm mode, run pump2
-        digitalWrite(WATER_PUMP_2_PIN, HIGH);
-        pump2Command = true;
-      }
-      else
-      {
-        digitalWrite(WATER_PUMP_2_PIN, LOW);
-        pump2Command = false;
-      }
-    }
     else if (currentMin == 0)
-      digitalWrite(WATER_PUMP_1_PIN, HIGH);
+      pump1Command = true;
     else
-      digitalWrite(WATER_PUMP_1_PIN, LOW);
+      pump1Command = false;
   }
   else
   { // pump in hand
     // pump1 is in override for set duration (set by user from webpage)
-
     // update web page every minute
     if (rtc.getSecond() == 0)
     {
@@ -686,14 +671,11 @@ void controlPumps(int currentHour, int currentMin)
   { // auto mode
     // Run water pump 2 from 12pm to 6pm continuously.  The other 12 hours, the pump will run for 1 min on the half hour
     if (currentHour >= 12 and currentHour < 18)
-    {
-      digitalWrite(WATER_PUMP_2_PIN, HIGH);
       pump2Command = true;
-    }
     else if (currentMin == 30)
-      digitalWrite(WATER_PUMP_2_PIN, HIGH);
+      pump2Command = true;
     else
-      digitalWrite(WATER_PUMP_2_PIN, LOW);
+      pump2Command = false;
   }
   else
   { // pump in hand
@@ -719,6 +701,10 @@ void controlPumps(int currentHour, int currentMin)
       setPumpAuto(WATER_PUMP_2_PIN);
     }
   }
+  // set pump1 command
+  digitalWrite(WATER_PUMP_1_PIN, pump1Command ? HIGH : LOW);
+  // set pump2 command
+  digitalWrite(WATER_PUMP_2_PIN, pump2Command ? HIGH : LOW);
 }
 void updatePumpStatuses()
 {
