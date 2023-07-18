@@ -6,12 +6,13 @@
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
 #include <ESP32Time.h>
-#include <DHT.h>
+
 #include <AsyncElegantOTA.h>
 
 #include "config.h"
 #include "pins.h"
 #include "waterLevel.h"
+#include "dhtReadings.h"
 
 #define UTC_OFFSET_IN_SECONDS -36000 // offset from greenwich time (Hawaii is UTC-10)
 #define NTP_SYNC_HOUR 4
@@ -28,13 +29,13 @@ void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info);          
 void updateAndSyncTime();                                                                            // update time from NTP server and sync to RTC
 String processor(const String &var);                                                                 // update web page with variables
 unsigned long setInterval(void (*callback)(), unsigned long previousMillis, unsigned long interval); // run function at interval
-void getDhtReadings();                                                                               // get temp and humidity readings from dht sensor
-void toggleAirPump();                                                                                // turn air pump on/off
-void overridePump(int pump_pin, int state, int time);                                                // put a pump in override
-void setPumpAuto(int pump_pin);                                                                      //  set a pump back to auto
-void controlPumps(int currentHour, int currentMin);                                                  // control water pumps in auto or override
-void checkPumpAlarms();                                                                              // check if pump status doesn't match command
-void updatePumpStatuses();                                                                           // update web with pump statuses
+
+void toggleAirPump();                                 // turn air pump on/off
+void overridePump(int pump_pin, int state, int time); // put a pump in override
+void setPumpAuto(int pump_pin);                       //  set a pump back to auto
+void controlPumps(int currentHour, int currentMin);   // control water pumps in auto or override
+void checkPumpAlarms();                               // check if pump status doesn't match command
+void updatePumpStatuses();                            // update web with pump statuses
 
 // Define NTP Client to get time
 WiFiUDP ntpUDP;
@@ -67,10 +68,8 @@ float distanceCm; // distance in cm from sensor to water
 AsyncWebServer server(80);
 // Create an Event Source on /events
 AsyncEventSource events("/events");
-DHT dht(DHT_PIN, DHT11);
 
 String ledState;
-float h, f, hif; // humidity, temp in fahrenheit, heat index fahrenheit
 bool pump1Command = false;
 bool pump1Override = false;
 bool pump1Status = false;
@@ -359,21 +358,21 @@ String processor(const String &var)
   {
     return lastNTPSync;
   }
-  else if (var == "TEMPERATURE")
-  {
-    // get current dht readings to update webpage
-    // only needs to run once and temperature is read first
-    getDhtReadings();
-    return String(f);
-  }
-  else if (var == "HUMIDITY")
-  {
-    return String(h);
-  }
-  else if (var == "HEAT_INDEX")
-  {
-    return String(hif);
-  }
+  // else if (var == "TEMPERATURE")
+  // {
+  //   // get current dht readings to update webpage
+  //   // only needs to run once and temperature is read first
+  //   getDhtReadings();
+  //   return String(f);
+  // }
+  // else if (var == "HUMIDITY")
+  // {
+  //   return String(h);
+  // }
+  // else if (var == "HEAT_INDEX")
+  // {
+  //   return String(hif);
+  // }
   else if (var == "WATER_LEVEL")
   {
     checkWaterLevel();
@@ -476,28 +475,7 @@ void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info)
   Serial.println(info.wifi_sta_disconnected.reason);
   WiFi.disconnect(true);
 }
-void getDhtReadings()
-{
-  h = dht.readHumidity();
-  f = dht.readTemperature(true); // true outputs in fahrenheit
-  if (isnan(h) || isnan(f))
-  {
-    Serial.println("Error: Failed to read from DHT sensor!");
-  }
-  else
-  {
-    // Compute heat index in Fahrenheit
-    hif = dht.computeHeatIndex(f, h);
-    Serial.println((String) "Temperature: " + f + "F");
-    Serial.println((String) "Humidity: " + h + "%");
-    Serial.println((String) "Heat Index: " + hif + "F");
-    Serial.println(rtc.getTime());
-    // Send Events to the Web Client with the Sensor Readings
-    events.send(String(f).c_str(), "temperature", millis());
-    events.send(String(h).c_str(), "humidity", millis());
-    events.send(String(hif).c_str(), "heatIndex", millis());
-  }
-}
+
 void toggleAirPump()
 {
   // if pump is overriden check timer

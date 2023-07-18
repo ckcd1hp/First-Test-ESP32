@@ -39,6 +39,8 @@ void HC_SR04::start()
 
 unsigned int HC_SR04::getRange(bool units)
 {
+    // once this function is called, the measurement is finished
+    _finished = false;
     // distance = (time / 2) / 29.1 (or 58) [cm] or (time / 2) / 74 (or 148) [inch]
     return (_end - _start) / ((units) ? 58 : 148);
 }
@@ -60,7 +62,7 @@ void HC_SR04::_echo_isr()
 void displayWaterLevel(int distanceCm)
 {
     // water level enum
-    WaterLevel waterLevel;
+    WaterLevel waterLevel = W_LOW;
     if (distanceCm > 20)
     {
         waterLevel = W_LOW;
