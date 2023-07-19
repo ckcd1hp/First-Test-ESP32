@@ -1,18 +1,19 @@
 #include <ESPAsyncWebServer.h>
-
+#include <WebSerial.h>
 #include "dhtReadings.h"
 
 DHT dht(DHT_PIN, DHT11);
 extern AsyncEventSource events;
+float h, f, hif; // humidity, temp in fahrenheit, heat index fahrenheit
 
 void getDhtReadings()
 {
-    float h, f, hif; // humidity, temp in fahrenheit, heat index fahrenheit
     h = dht.readHumidity();
     f = dht.readTemperature(true); // true outputs in fahrenheit
     if (isnan(h) || isnan(f))
     {
-        Serial.println("Error: Failed to read from DHT sensor!");
+        // Serial.println("Error: Failed to read from DHT sensor!");
+        WebSerial.println("Error: Failed to read from DHT sensor!");
     }
     else
     {
@@ -23,8 +24,8 @@ void getDhtReadings()
         // Serial.println((String) "Heat Index: " + hif + "F");
         // Serial.println(rtc.getTime());
         // Send Events to the Web Client with the Sensor Readings
-        events.send(String(f).c_str(), "temperature", millis());
-        events.send(String(h).c_str(), "humidity", millis());
-        events.send(String(hif).c_str(), "heatIndex", millis());
+        events.send(String(f, 1).c_str(), "temperature", millis());
+        events.send(String(h, 0).c_str(), "humidity", millis());
+        events.send(String(hif, 1).c_str(), "heatIndex", millis());
     }
 }

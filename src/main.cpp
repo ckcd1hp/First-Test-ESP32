@@ -6,7 +6,7 @@
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
 #include <ESP32Time.h>
-
+#include <WebSerial.h>
 #include <AsyncElegantOTA.h>
 
 #include "config.h"
@@ -102,6 +102,8 @@ bool airPumpAlarm = false;
 unsigned long pump1AlarmTimeEpochEnd = 0;
 unsigned long pump2AlarmTimeEpochEnd = 0;
 unsigned long airPumpAlarmTimeEpochEnd = 0;
+// temps
+extern float f, hif, h;
 
 void setup()
 {
@@ -208,6 +210,7 @@ void setup()
     client->send("hello!", NULL, millis(), 10000); });
   server.addHandler(&events);
   AsyncElegantOTA.begin(&server);
+  WebSerial.begin(&server);
   server.begin();
 
   // initial dht reading
@@ -237,30 +240,20 @@ void loop()
     {
       float avgPump1ADC = pump1Samples / 50;
       float pump1Voltage = (avgPump1ADC * (3.31 / 4095.0)) - 1.52; // 1.55 is voltage reading at 0 current
-      float pump1Current = 2 * pump1Voltage / mvPerAmp;
+      float pump1Current = 3 * pump1Voltage / mvPerAmp;            // 3 is the gain of the current sensor
       float avgPump2ADC = pump2Samples / 50;
-      float pump2Voltage = avgPump2ADC * 3.3 / 4095.0 - 1.55; // 1.55 is voltage reading at 0 current
-      float pump2Current = pump2Voltage * 2 / mvPerAmp;
+      float pump2Voltage = avgPump2ADC * 3.3 / 4095.0 - 1.52; // 1.55 is voltage reading at 0 current
+      float pump2Current = pump2Voltage * 3 / mvPerAmp;
       float avgAirPumpADC = airPumpSamples / 50;
-      float airPumpVoltage = avgAirPumpADC * 3.3 / 4095.0 - 1.55; // 1.55 is voltage reading at 0 current
-      float airPumpCurrent = airPumpVoltage * 2 / mvPerAmp;
+      float airPumpVoltage = avgAirPumpADC * 3.3 / 4095.0 - 1.52; // 1.55 is voltage reading at 0 current
+      float airPumpCurrent = airPumpVoltage * 3 / mvPerAmp;
       pump1Status = (pump1Current > 0.5) ? true : false;
       pump2Status = (pump2Current > 0.5) ? true : false;
       airPumpStatus = (airPumpCurrent > 0.5) ? true : false;
-      // Current sensor debug calibrations
-      // Serial.println(avgPump1ADC);
-      // Serial.print("Pump 1 Voltage: ");
-      // Serial.println(pump1Voltage, 3);
-      // Serial.print("Pump 1 Current: ");
-      // Serial.println(pump1Current, 3);
-      // Serial.print("Pump 2 Voltage: ");
-      // Serial.println(pump2Voltage);
-      // Serial.print("Pump 2 Current: ");
-      // Serial.println(pump2Current);
-      // Serial.print("Air Pump Voltage: ");
-      // Serial.println(airPumpVoltage);
-      // Serial.print("Air Pump Current: ");
-      // Serial.println(airPumpCurrent);
+      // WebSerial.println("Pump 2 Voltage: " + String(pump2Voltage));
+      // WebSerial.println("Pump 2 Current: " + String(pump2Current));
+      // WebSerial.println("Air Pump Voltage: " + String(airPumpVoltage));
+      // WebSerial.println("Air Pump Current: " + String(airPumpCurrent));
       samplingCounter = 0;
       pump1Samples = 0.0;
       pump2Samples = 0.0;
@@ -358,21 +351,21 @@ String processor(const String &var)
   {
     return lastNTPSync;
   }
-  // else if (var == "TEMPERATURE")
-  // {
-  //   // get current dht readings to update webpage
-  //   // only needs to run once and temperature is read first
-  //   getDhtReadings();
-  //   return String(f);
-  // }
-  // else if (var == "HUMIDITY")
-  // {
-  //   return String(h);
-  // }
-  // else if (var == "HEAT_INDEX")
-  // {
-  //   return String(hif);
-  // }
+  else if (var == "TEMPERATURE")
+  {
+    // get current dht readings to update webpage
+    // only needs to run once and temperature is read first
+    getDhtReadings();
+    return String(f, 1);
+  }
+  else if (var == "HUMIDITY")
+  {
+    return String(h, 0);
+  }
+  else if (var == "HEAT_INDEX")
+  {
+    return String(hif, 1);
+  }
   else if (var == "WATER_LEVEL")
   {
     checkWaterLevel();
