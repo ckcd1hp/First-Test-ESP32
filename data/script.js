@@ -110,15 +110,15 @@ if (!!window.EventSource) {
     document.getElementById("heat").innerHTML = e.data;
   }, false);
   source.addEventListener('pump1Status', function(e) {
-    console.log("pump1Status", e.data);
+    //console.log("pump1Status", e.data);
     document.getElementById("pump1Status").innerHTML = e.data;
   }, false);
   source.addEventListener('pump2Status', function(e) {
-    console.log("pump2Status", e.data);
+    //console.log("pump2Status", e.data);
     document.getElementById("pump2Status").innerHTML = e.data;
   }, false);
   source.addEventListener('airPumpStatus', function(e) {
-    console.log("airPumpStatus", e.data);
+    //console.log("airPumpStatus", e.data);
     document.getElementById("airPumpStatus").innerHTML = e.data;
   }, false);
   source.addEventListener('pump1Command', function(e) {
