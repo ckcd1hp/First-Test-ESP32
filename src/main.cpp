@@ -18,9 +18,25 @@
 #define NTP_SYNC_HOUR 4
 #define NTP_SYNC_MINUTE 0
 #define NTP_SYNC_SECOND 0
-#define WIFI_RETRY_WAIT_TIME 300000 // 5 minutes in milliseconds
-#define NTP_UPDATE_INTERVAL 1800000 // 30 min in milliseconds (minimum retry time, normally daily)
-#define SOUND_SPEED 0.0343          // cm/microsecond
+#define WIFI_RETRY_WAIT_TIME 300000       // 5 minutes in milliseconds
+#define NTP_UPDATE_INTERVAL 1800000       // 30 min in milliseconds (minimum retry time, normally daily)
+#define ADC_SAMPLING_INTERVAL 50          // 50 milliseconds is 20 samples in 1 second
+#define STATUS_UPDATE_INTERVAL 10000      // 10 seconds
+#define WATER_LEVEL_UPDATE_INTERVAL 60000 // 1 minute
+#define DHT_UPDATE_INTERVAL 900000        // 15 minutes
+#define SOUND_SPEED 0.0343                // cm/microsecond
+#define NUM_SAMPLES 20                    // number of samples to take for current sensor
+#define CURRENT_GAIN 3                    // multiply current by 3
+
+// #define DEBUG
+
+#ifdef DEBUG
+#define DebugLog(message)      \
+  WebSerial.print("[DEBUG] "); \
+  WebSerial.println(message)
+#else
+#define DebugLog(message)
+#endif
 
 // function declarations
 void WiFiStationConnected(WiFiEvent_t event, WiFiEventInfo_t info);                                  // on connect to Wifi
@@ -36,6 +52,7 @@ void controlPumps(int currentHour, int currentMin);   // control water pumps in 
 void checkPumpAlarms();                               // check if pump status doesn't match command
 void updatePumpStatuses();                            // update web with pump statuses
 void checkOverrideStatuses(int currentSecond);        // check override statuses every second
+void sampleCurrent();                                 // sample current every 50 milliseconds
 
 // Define NTP Client to get time
 WiFiUDP ntpUDP;
@@ -44,20 +61,19 @@ ESP32Time rtc; // no offset, as that is already added from NTPClient
 bool rtcUpdated = false;
 String lastNTPSync = "";
 
-// time interval setup
-int dhtInterval = 900000;             // check dht every 15 minutes
-int updatePumpStatusInterval = 10000; // update pump statuses to web server every 10 seconds
-int waterLevelInterval = 60000;       // check water level every minute
-int adcSamplingInterval = 50;         // 50 milliseconds means 20 samples in 1 second
+// time counters
 unsigned long dhtMillisCounter = 0;
 unsigned long wifiPrevMillis = 0;
 unsigned long adcSamplingMillisCounter = 0;
-unsigned long pumpStatusMillisCounter = 0;
+unsigned long statusUpdateMillisCounter = 0;
 unsigned long waterLevelMillisCounter = 0;
+// sampling variables
+bool beginSampling = false;
 int samplingCounter = 0;
 float pump1Samples = 0.0;
 float pump2Samples = 0.0;
 float airPumpSamples = 0.0;
+// time variables
 unsigned long now;
 int previousMinute = -1; // track the last minute to run functions on the new minute
 int previousSecond = -1; // track the last second to run functions on the new second
@@ -223,47 +239,27 @@ void loop()
     displayWaterLevel(ultrasonicSensor.getRange());
   }
   now = millis();
-  // sample current sensors every 50ms
-  if (now - adcSamplingMillisCounter >= adcSamplingInterval)
-  {
-    pump1Samples += analogRead(WATER_PUMP_1_CURRENT);
-    pump2Samples += analogRead(WATER_PUMP_2_CURRENT);
-    airPumpSamples += analogRead(AIR_PUMP_CURRENT);
 
-    // increase sample counter
-    adcSamplingMillisCounter += adcSamplingInterval;
-    samplingCounter++;
-    // 50 samples = 2.5s
-    if (samplingCounter >= 50)
+  // check if it is time to sample current
+  if (now - statusUpdateMillisCounter >= STATUS_UPDATE_INTERVAL)
+  {
+    beginSampling = true;
+    statusUpdateMillisCounter += STATUS_UPDATE_INTERVAL;
+  }
+  if (beginSampling)
+  {
+    // sample current sensors every 50ms
+    if (now - adcSamplingMillisCounter >= ADC_SAMPLING_INTERVAL)
     {
-      float avgPump1ADC = pump1Samples / 50;
-      float pump1Voltage = (avgPump1ADC * (3.31 / 4095.0)) - 1.52; // 1.55 is voltage reading at 0 current
-      float pump1Current = 3 * pump1Voltage / mvPerAmp;            // 3 is the gain of the current sensor
-      float avgPump2ADC = pump2Samples / 50;
-      float pump2Voltage = avgPump2ADC * 3.3 / 4095.0 - 1.52; // 1.55 is voltage reading at 0 current
-      float pump2Current = pump2Voltage * 3 / mvPerAmp;
-      float avgAirPumpADC = airPumpSamples / 50;
-      float airPumpVoltage = avgAirPumpADC * 3.3 / 4095.0 - 1.52; // 1.55 is voltage reading at 0 current
-      float airPumpCurrent = airPumpVoltage * 3 / mvPerAmp;
-      pump1Status = (pump1Current > 0.5) ? true : false;
-      pump2Status = (pump2Current > 0.5) ? true : false;
-      airPumpStatus = (airPumpCurrent > 0.5) ? true : false;
-      // WebSerial.println("Pump 2 Voltage: " + String(pump2Voltage));
-      // WebSerial.println("Pump 2 Current: " + String(pump2Current));
-      // WebSerial.println("Air Pump Voltage: " + String(airPumpVoltage));
-      // WebSerial.println("Air Pump Current: " + String(airPumpCurrent));
-      samplingCounter = 0;
-      pump1Samples = 0.0;
-      pump2Samples = 0.0;
-      airPumpSamples = 0.0;
+      sampleCurrent();
+      adcSamplingMillisCounter += ADC_SAMPLING_INTERVAL;
     }
   }
-  // update pump status on the web every 10 seconds
-  pumpStatusMillisCounter = setInterval(updatePumpStatuses, pumpStatusMillisCounter, updatePumpStatusInterval);
+
   // get dht readings every set interval (default 15 min)
-  dhtMillisCounter = setInterval(getDhtReadings, dhtMillisCounter, dhtInterval);
+  dhtMillisCounter = setInterval(getDhtReadings, dhtMillisCounter, DHT_UPDATE_INTERVAL);
   // get water level every set interval (default 15 min)
-  waterLevelMillisCounter = setInterval(checkWaterLevel, waterLevelMillisCounter, waterLevelInterval);
+  waterLevelMillisCounter = setInterval(checkWaterLevel, waterLevelMillisCounter, WATER_LEVEL_UPDATE_INTERVAL);
 
   // check counter if connecting to wifi
   if (!readyToConnectWifi)
@@ -710,6 +706,51 @@ void updatePumpStatuses()
   events.send(p1String.c_str(), "pump1Status", millis());
   events.send(p2String.c_str(), "pump2Status", millis());
   events.send(airPString.c_str(), "airPumpStatus", millis());
+}
+void sampleCurrent()
+{
+  // sample current every 50 milliseconds
+  if (samplingCounter < NUM_SAMPLES)
+  {
+    // add to samples
+    pump1Samples += analogRead(WATER_PUMP_1_CURRENT);
+    pump2Samples += analogRead(WATER_PUMP_2_CURRENT);
+    airPumpSamples += analogRead(AIR_PUMP_CURRENT);
+    samplingCounter++;
+  }
+  else
+  {
+    // calculate average
+    pump1Samples /= NUM_SAMPLES;
+    pump2Samples /= NUM_SAMPLES;
+    airPumpSamples /= NUM_SAMPLES;
+    // convert to voltage
+    pump1Samples = pump1Samples * (3.3 / 4095) - 1.52;
+    pump2Samples = pump2Samples * (3.3 / 4095) - 1.52;
+    airPumpSamples = airPumpSamples * (3.3 / 4095) - 1.52;
+    // calculate amps
+    float pump1Current = pump1Samples * CURRENT_GAIN / mvPerAmp;
+    float pump2Current = pump2Samples * CURRENT_GAIN / mvPerAmp;
+    float airPumpCurrent = airPumpSamples * CURRENT_GAIN / mvPerAmp;
+    // update pump statuses
+    pump1Status = (pump1Current > 0.5) ? true : false;
+    pump2Status = (pump2Current > 0.5) ? true : false;
+    airPumpStatus = (airPumpCurrent > 0.3) ? true : false;
+    // write status to web
+    updatePumpStatuses();
+    // debug
+    DebugLog("Pump 1 Current: " + String(pump1Current));
+    DebugLog("Pump 2 Current: " + String(pump2Current));
+    DebugLog("Air Pump Current: " + String(airPumpCurrent));
+    // reset counter
+    samplingCounter = 0;
+    // reset samples
+    pump1Samples = 0.0;
+    pump2Samples = 0.0;
+    airPumpSamples = 0.0;
+    // reset begin sampling
+    beginSampling = false;
+  }
 }
 void checkPumpAlarms()
 {
