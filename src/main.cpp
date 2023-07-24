@@ -1,5 +1,6 @@
 #include <NTPClient.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <WiFiUdp.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -8,6 +9,8 @@
 #include <ESP32Time.h>
 #include <WebSerial.h>
 #include <AsyncElegantOTA.h>
+#include <UniversalTelegramBot.h>
+#include <ArduinoJson.h>
 
 #include "config.h"
 #include "pins.h"
@@ -82,6 +85,9 @@ int previousSecond = -1; // track the last second to run functions on the new se
 AsyncWebServer server(80);
 // Create an Event Source on /events
 AsyncEventSource events("/events");
+// Telegram bot
+WiFiClientSecure client;
+UniversalTelegramBot bot(BOT_TOKEN, client);
 
 String ledState;
 bool pump1Command = false;
@@ -150,6 +156,7 @@ void setup()
   WiFi.onEvent(WiFiStationDisconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.mode(WIFI_STA); // station mode: ESP32 connects to access point
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  client.setCACert(TELEGRAM_CERTIFICATE_ROOT); // Add root certificate for api.telegram.org
   Serial.println("Connecting to WIFI");
   delay(10000);
   timeClient.begin();
@@ -226,7 +233,8 @@ void setup()
   AsyncElegantOTA.begin(&server);
   WebSerial.begin(&server);
   server.begin();
-
+  // send inital bot message
+  bot.sendMessage(CHAT_ID, BOT_GREETING);
   // initial dht reading
   getDhtReadings();
 }
