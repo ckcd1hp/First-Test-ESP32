@@ -11,6 +11,7 @@
 #include <AsyncElegantOTA.h>
 #include <UniversalTelegramBot.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 
 #include "config.h"
 #include "pins.h"
@@ -21,15 +22,14 @@
 #define NTP_SYNC_HOUR 4
 #define NTP_SYNC_MINUTE 0
 #define NTP_SYNC_SECOND 0
-#define WIFI_RETRY_WAIT_TIME 300000       // 5 minutes in milliseconds
-#define NTP_UPDATE_INTERVAL 1800000       // 30 min in milliseconds (minimum retry time, normally daily)
-#define ADC_SAMPLING_INTERVAL 50          // 50 milliseconds is 20 samples in 1 second
-#define STATUS_UPDATE_INTERVAL 10000      // 10 seconds
-#define WATER_LEVEL_UPDATE_INTERVAL 60000 // 1 minute
-#define DHT_UPDATE_INTERVAL 900000        // 15 minutes
-#define SOUND_SPEED 0.0343                // cm/microsecond
-#define NUM_SAMPLES 20                    // number of samples to take for current sensor
-#define CURRENT_GAIN 3                    // multiply current by 3
+#define WIFI_RETRY_WAIT_TIME 300000        // 5 minutes in milliseconds
+#define NTP_UPDATE_INTERVAL 1800000        // 30 min in milliseconds (minimum retry time, normally daily)
+#define NUTRIENT_REMINDER_INTERVAL 1209600 // 2 weeks in seconds
+#define ADC_SAMPLING_INTERVAL 50           // 50 milliseconds is 20 samples in 1 second
+#define STATUS_UPDATE_INTERVAL 10000       // 10 seconds
+#define SOUND_SPEED 0.0343                 // cm/microsecond
+#define NUM_SAMPLES 20                     // number of samples to take for current sensor
+#define CURRENT_GAIN 3                     // multiply current by 3
 
 // #define DEBUG
 
@@ -49,13 +49,17 @@ void updateAndSyncTime();                                                       
 String processor(const String &var);                                                                 // update web page with variables
 unsigned long setInterval(void (*callback)(), unsigned long previousMillis, unsigned long interval); // run function at interval
 
-void overridePump(int pump_pin, int state, int time); // put a pump in override
-void setPumpAuto(int pump_pin);                       //  set a pump back to auto
-void controlPumps(int currentHour, int currentMin);   // control water pumps in auto or override
-void checkPumpAlarms();                               // check if pump status doesn't match command
-void updatePumpStatuses();                            // update web with pump statuses
-void checkOverrideStatuses(int currentSecond);        // check override statuses every second
-void sampleCurrent();                                 // sample current every 50 milliseconds
+void overridePump(int pump_pin, int state, int time);          // put a pump in override
+void setPumpAuto(int pump_pin);                                //  set a pump back to auto
+void controlPumps(int currentHour, int currentMin);            // control water pumps in auto or override
+void checkPumpAlarms();                                        // check if pump status doesn't match command
+void updatePumpStatuses();                                     // update web with pump statuses
+void checkOverrideStatuses(int currentSecond);                 // check override statuses every second
+void sampleCurrent();                                          // sample current every 50 milliseconds
+void updateNutrientReminder();                                 // when user adds plant food, set new reminder 2 weeks out
+void sendNutrientReminder();                                   // when nutrient date passes, send notification and update web
+String getNewNutrientDate(unsigned long newDate);              // convert epoch to formatted date string
+time_t convertUnsignedLongToTimeT(unsigned long epochSeconds); // helper function converting ulong to time_t
 
 // Define NTP Client to get time
 WiFiUDP ntpUDP;
@@ -65,11 +69,11 @@ bool rtcUpdated = false;
 String lastNTPSync = "";
 
 // time counters
-unsigned long dhtMillisCounter = 0;
 unsigned long wifiPrevMillis = 0;
 unsigned long adcSamplingMillisCounter = 0;
 unsigned long statusUpdateMillisCounter = 0;
-unsigned long waterLevelMillisCounter = 0;
+// plant nutrient reminder
+unsigned long nutrientReminderEpoch = 0;
 // sampling variables
 bool beginSampling = false;
 int samplingCounter = 0;
@@ -88,6 +92,8 @@ AsyncEventSource events("/events");
 // Telegram bot
 WiFiClientSecure client;
 UniversalTelegramBot bot(BOT_TOKEN, client);
+// Preferences
+Preferences preferences;
 
 String ledState;
 bool pump1Command = false;
@@ -118,6 +124,9 @@ bool airPumpStatusUpdated = false;
 bool pump1Alarm = false;
 bool pump2Alarm = false;
 bool airPumpAlarm = false;
+bool lowWaterAlarm = false;
+bool lowerWaterAlarmAck = false;
+bool nutrientReminderAck = false;
 // alarm after 1 minute of command/status mismatch
 unsigned long pump1AlarmTimeEpochEnd = 0;
 unsigned long pump2AlarmTimeEpochEnd = 0;
@@ -173,7 +182,7 @@ void setup()
             { request->send(SPIFFS, "/script.js", "text/javascript"); });
 
   // Route to set GPIO to HIGH
-  server.on("/led2on", HTTP_GET, [](AsyncWebServerRequest *request)
+  server.on("/addedplantfood", HTTP_GET, [](AsyncWebServerRequest *request)
             {
     digitalWrite(LED_PIN, HIGH);    
     request->send(SPIFFS, "/index.html", String(), false, processor); });
@@ -233,8 +242,19 @@ void setup()
   AsyncElegantOTA.begin(&server);
   WebSerial.begin(&server);
   server.begin();
-  // send inital bot message
-  bot.sendMessage(CHAT_ID, BOT_GREETING);
+  // load saved data
+  preferences.begin("nft", false);
+  nutrientReminderEpoch = preferences.getULong("nutrientReminderEpoch", nutrientReminderEpoch);
+  int startCounter = preferences.getUInt("startCounter", 0);
+
+  if (startCounter != 0)
+    bot.sendMessage(CHAT_ID, BOT_RESTART_MESSAGE); // send restart bot message
+  else
+    bot.sendMessage(CHAT_ID, BOT_GREETING_MESSAGE); // send bot greeting message
+  // update esp32 start counter
+  startCounter++;
+  preferences.putUInt("startCounter", startCounter);
+  preferences.end();
   // initial dht reading
   getDhtReadings();
 }
@@ -263,12 +283,6 @@ void loop()
       adcSamplingMillisCounter += ADC_SAMPLING_INTERVAL;
     }
   }
-
-  // get dht readings every set interval (default 15 min)
-  dhtMillisCounter = setInterval(getDhtReadings, dhtMillisCounter, DHT_UPDATE_INTERVAL);
-  // get water level every set interval (default 15 min)
-  waterLevelMillisCounter = setInterval(checkWaterLevel, waterLevelMillisCounter, WATER_LEVEL_UPDATE_INTERVAL);
-
   // check counter if connecting to wifi
   if (!readyToConnectWifi)
   {
@@ -297,6 +311,11 @@ void loop()
   {
     // control pump in auto
     controlPumps(currentHour, currentMin);
+    // check water level once a minute
+    checkWaterLevel();
+    // read temps every 15 minutes
+    if (currentMin % 15 == 0)
+      getDhtReadings();
     previousMinute = currentMin;
   }
   if (currentSec != previousSecond)
@@ -616,10 +635,21 @@ void controlPumps(int currentHour, int currentMin)
   // air pump
   if (!airPumpOverride)
   { // auto mode
-    // Toggle air pump every 15 minutes
-    if (currentMin % 15 == 0)
+    // Toggle air pump every 15 minutes between 6 am and 6pm
+    if (currentHour >= 6 and currentHour < 18)
     {
-      airPumpCommand = !airPumpCommand;
+      if (currentMin % 15 == 0)
+      {
+        airPumpCommand = !airPumpCommand;
+        // Send Events to the Web Client with Air Pump Command
+        String command = (airPumpCommand) ? " On " : " Off ";
+        String pumpCommand = command + "(Auto)";
+        events.send(pumpCommand.c_str(), "airPumpCommand", millis());
+      }
+    }
+    else if (currentHour == 18 and currentMin == 0)
+    {
+      airPumpCommand = false;
       // Send Events to the Web Client with Air Pump Command
       String command = (airPumpCommand) ? " On " : " Off ";
       String pumpCommand = command + "(Auto)";
@@ -770,7 +800,7 @@ void checkPumpAlarms()
       if (!pump1Alarm)
       {
         pump1AlarmTimeEpochEnd = rtc.getEpoch() + 60; // 1 minute timer
-        Serial.println("Starting pump1 alarm timer");
+        // Serial.println("Starting pump1 alarm timer");
       }
     }
     else
@@ -780,9 +810,13 @@ void checkPumpAlarms()
         // set alarm
         pump1Alarm = true;
         pump1AlarmTimeEpochEnd = 0;
+        // send alarm to web
         String p1Alarm = "<i class = \"fas fa-bell\" style = \"color:#c81919;\"></ i> Water Pump 1";
         events.send(p1Alarm.c_str(), "waterPump1Header", millis());
-        Serial.println("Pump1 alarm active");
+        // send alarm to bot
+        const String botPump1FailMessage = BOT_PUMP_FAIL_MESSAGE_1 + String("Water Pump 1") + BOT_PUMP_FAIL_MESSAGE_2;
+        bot.sendMessage(CHAT_ID, botPump1FailMessage);
+        // Serial.println("Pump1 alarm active");
       }
     }
   }
@@ -796,7 +830,7 @@ void checkPumpAlarms()
       pump1Alarm = false;
       String p1 = "Water Pump 1";
       events.send(p1.c_str(), "waterPump1Header", millis());
-      Serial.println("Pump1 alarm cleared");
+      // Serial.println("Pump1 alarm cleared");
     }
   }
   // check pump2
@@ -808,7 +842,7 @@ void checkPumpAlarms()
       if (!pump2Alarm)
       {
         pump2AlarmTimeEpochEnd = rtc.getEpoch() + 60; // 1 minute timer
-        Serial.println("Starting pump2 alarm timer");
+        // Serial.println("Starting pump2 alarm timer");
       }
     }
     else
@@ -818,9 +852,14 @@ void checkPumpAlarms()
         // set alarm
         pump2Alarm = true;
         pump2AlarmTimeEpochEnd = 0;
+        // send alarm to web
         String p2Alarm = "<i class = \"fas fa-bell\" style = \"color:#c81919;\"></ i> Water Pump 2";
         events.send(p2Alarm.c_str(), "waterPump2Header", millis());
-        Serial.println("Pump2 alarm active");
+        // send alarm to bot
+        // send alarm to bot
+        const String botPump1FailMessage = BOT_PUMP_FAIL_MESSAGE_1 + String("Water Pump 2") + BOT_PUMP_FAIL_MESSAGE_2;
+        bot.sendMessage(CHAT_ID, botPump1FailMessage);
+        // Serial.println("Pump2 alarm active");
       }
     }
   }
@@ -834,7 +873,7 @@ void checkPumpAlarms()
       pump2Alarm = false;
       String p2 = "Water Pump 2";
       events.send(p2.c_str(), "waterPump2Header", millis());
-      Serial.println("Pump2 alarm cleared");
+      // Serial.println("Pump2 alarm cleared");
     }
   }
   // check air pump
@@ -846,7 +885,7 @@ void checkPumpAlarms()
       if (!airPumpAlarm)
       {
         airPumpAlarmTimeEpochEnd = rtc.getEpoch() + 60; // 1 minute timer
-        Serial.println("Starting air pump alarm timer");
+        // Serial.println("Starting air pump alarm timer");
       }
     }
     else
@@ -856,9 +895,12 @@ void checkPumpAlarms()
         // set alarm
         airPumpAlarm = true;
         airPumpAlarmTimeEpochEnd = 0;
+        // send alarm to web
         String airPumpAlarm = "<i class = \"fas fa-bell\" style = \"color:#c81919;\"></ i> Air Pump";
         events.send(airPumpAlarm.c_str(), "airPumpHeader", millis());
-        Serial.println("Air pump alarm active");
+        // send alarm to bot
+        bot.sendMessage(CHAT_ID, BOT_AIR_PUMP_FAIL_MESSAGE);
+        // Serial.println("Air pump alarm active");
       }
     }
   }
@@ -874,5 +916,55 @@ void checkPumpAlarms()
       events.send(p.c_str(), "airPumpHeader", millis());
       Serial.println("Air Pump alarm cleared");
     }
+  }
+}
+void updateNutrientReminder()
+{
+  // set next reminder
+  nutrientReminderEpoch = rtc.getEpoch() + NUTRIENT_REMINDER_INTERVAL;
+  // save to preferences
+  preferences.begin("nft", false);
+  preferences.putULong("nutrientReminderEpoch", nutrientReminderEpoch);
+  preferences.end();
+  // update web
+  String nutrientDate = "<span style = \"color:#000000;\">" + getNewNutrientDate(nutrientReminderEpoch) + "</span>";
+  events.send(nutrientDate.c_str(), "nutrientReminder", millis());
+}
+void sendNutrientReminder()
+{
+  // check if it is time to send nutrient reminder
+  if (rtc.getEpoch() >= nutrientReminderEpoch and nutrientReminderEpoch != 0)
+  {
+    // send reminder
+    bot.sendMessage(CHAT_ID, BOT_NUTRIENT_REMINDER_MESSAGE);
+    // update web
+    String nutrientDate = "<span style = \"color:#c81919;\">" + getNewNutrientDate(nutrientReminderEpoch) + "</span>";
+    events.send(nutrientDate.c_str(), "nutrientReminder", millis());
+  }
+}
+String getNewNutrientDate(unsigned long newDate)
+{
+  time_t nutrientRemindertime_t = convertUnsignedLongToTimeT(newDate);
+  // convert nutrientReminderEpoch to date
+  struct tm timeinfo;
+  localtime_r(&nutrientRemindertime_t, &timeinfo);
+  char buffer[10];
+  strftime(buffer, sizeof(buffer), "%-m/%-d/%y", &timeinfo);
+  return String(buffer);
+}
+time_t convertUnsignedLongToTimeT(unsigned long epochSeconds)
+{
+  // Since time_t is a signed type, check if the value can be represented in a signed long.
+  if (epochSeconds <= (unsigned long)LONG_MAX)
+  {
+    // If it can be represented as a signed long, simply cast it to time_t.
+    return (time_t)epochSeconds;
+  }
+  else
+  {
+    // If it exceeds the maximum value of a signed long, you need to adjust it
+    // by subtracting the offset between the maximum value of signed long and
+    // the maximum value of unsigned long, then cast it to time_t.
+    return (time_t)(epochSeconds - ((unsigned long)LONG_MAX) - 1);
   }
 }
