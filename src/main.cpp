@@ -300,15 +300,13 @@ void loop()
     checkOverrideStatuses(currentSec);
     // check pump alarms
     checkPumpAlarms();
-    if (currentSec % 2 != 0)
+
+    // for messages every second
+    int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+    while (numNewMessages)
     {
-      // for messages every other second
-      int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
-      while (numNewMessages)
-      {
-        handleNewMessages(numNewMessages);
-        numNewMessages = bot.getUpdates(bot.last_message_received + 1);
-      }
+      handleNewMessages(numNewMessages);
+      numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     }
 
     int currentMin = rtc.getMinute();
@@ -800,7 +798,7 @@ void checkPumpAlarms()
       // first instance of mismatch, start timer if not already in alarm
       if (!pump1Alarm)
       {
-        pump1AlarmTimeEpochEnd = rtc.getEpoch() + 60; // 1 minute timer
+        pump1AlarmTimeEpochEnd = rtc.getEpoch() + 300; // 5 minute timer
         // Serial.println("Starting pump1 alarm timer");
       }
     }
@@ -842,7 +840,7 @@ void checkPumpAlarms()
       // first instance of mismatch, start timer if not already in alarm
       if (!pump2Alarm)
       {
-        pump2AlarmTimeEpochEnd = rtc.getEpoch() + 60; // 1 minute timer
+        pump2AlarmTimeEpochEnd = rtc.getEpoch() + 300; // 5 minute timer
         // Serial.println("Starting pump2 alarm timer");
       }
     }
@@ -885,7 +883,7 @@ void checkPumpAlarms()
       // first instance of mismatch, start timer if not already in alarm
       if (!airPumpAlarm)
       {
-        airPumpAlarmTimeEpochEnd = rtc.getEpoch() + 60; // 1 minute timer
+        airPumpAlarmTimeEpochEnd = rtc.getEpoch() + 300; // 5 minute timer
         // Serial.println("Starting air pump alarm timer");
       }
     }
@@ -901,7 +899,7 @@ void checkPumpAlarms()
         events.send(airPumpAlarm.c_str(), "airPumpHeader", millis());
         // send alarm to bot
         bot.sendMessage(CHAT_ID, BOT_AIR_PUMP_FAIL_MESSAGE);
-        // Serial.println("Air pump alarm active");
+        Serial.println("Air pump alarm active");
       }
     }
   }
