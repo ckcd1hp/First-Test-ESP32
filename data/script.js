@@ -146,7 +146,7 @@ if (!!window.EventSource) {
   source.addEventListener('airPumpHeader', function(e) {
     document.getElementById("airPumpHeader").innerHTML = e.data;
   }, false);
-  source.addEventListener('nutrientDate', function(e) {
+  source.addEventListener('nutrientReminder', function(e) {
     document.getElementById("nutrientDate").innerHTML = e.data;
   }, false);
 }
