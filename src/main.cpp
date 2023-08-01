@@ -25,12 +25,12 @@
 #define NTP_UPDATE_INTERVAL 1800000        // 30 min in milliseconds (minimum retry time, normally daily)
 #define NUTRIENT_REMINDER_INTERVAL 1209600 // 2 weeks in seconds
 #define ADC_SAMPLING_INTERVAL 50           // 50 milliseconds is 20 samples in 1 second
-#define STATUS_UPDATE_INTERVAL 10000       // 10 seconds
+#define STATUS_UPDATE_INTERVAL 60000       // 10 seconds
 #define SOUND_SPEED 0.0343                 // cm/microsecond
 #define NUM_SAMPLES 20                     // number of samples to take for current sensor
 #define CURRENT_GAIN 3                     // multiply current by 3
 
-// #define DEBUG
+#define DEBUG
 
 #ifdef DEBUG
 #define DebugLog(message)      \
@@ -71,7 +71,7 @@ unsigned long wifiPrevMillis = 0;
 unsigned long adcSamplingMillisCounter = 0;
 unsigned long statusUpdateMillisCounter = 0;
 // plant nutrient reminder
-unsigned long nutrientReminderEpoch = 0;
+unsigned long nutrientReminderEpoch;
 // sampling variables
 bool beginSampling = false;
 int samplingCounter = 0;
@@ -179,8 +179,8 @@ void setup()
   server.on("/addedplantfood", HTTP_GET, [](AsyncWebServerRequest *request)
             {
     updateNutrientReminder();
-    //request->send(SPIFFS, "/index.html", String(), false, processor); });
-    request->send(200, "text/plain", "OK"); });
+    request->send(SPIFFS, "/index.html", String(), false, processor); });
+  // request->send(200, "text/plain", "OK"); });
 
   server.on("/override", HTTP_GET, [](AsyncWebServerRequest *request)
             {
@@ -233,11 +233,11 @@ void setup()
   server.begin();
   // load saved data
   preferences.begin("nft", false);
-  nutrientReminderEpoch = preferences.getULong("nutrientReminderEpoch", nutrientReminderEpoch);
+  nutrientReminderEpoch = preferences.getULong64("nRE", 0);
   int startCounter = preferences.getUInt("startCounter", 0);
 
   if (startCounter != 0)
-    bot.sendMessage(CHAT_ID, BOT_RESTART_MESSAGE); // send restart bot message
+    bot.sendMessage(CHAT_ID, String(startCounter)); // send restart bot message
   else
     bot.sendMessage(CHAT_ID, BOT_GREETING_MESSAGE); // send bot greeting message
   // update esp32 start counter
@@ -258,10 +258,10 @@ void loop()
   now = millis();
 
   // check if it is time to sample current
-  if (now - statusUpdateMillisCounter >= STATUS_UPDATE_INTERVAL)
+  if ((!beginSampling) and (now - statusUpdateMillisCounter >= STATUS_UPDATE_INTERVAL))
   {
     beginSampling = true;
-    statusUpdateMillisCounter += STATUS_UPDATE_INTERVAL;
+    WebSerial.println("Start Sampling!");
   }
   if (beginSampling)
   {
@@ -285,7 +285,7 @@ void loop()
   {
     // ready to connect
     delay(5000); // will attempt to reconnect before disconnect event even fires
-    Serial.println("Reconnecting to WiFi");
+    // Serial.println("Reconnecting to WiFi");
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     wifiPrevMillis = now; // reset timer
     readyToConnectWifi = false;
@@ -313,6 +313,7 @@ void loop()
     /* --------------- MINUTE CHANGE -------------------*/
     if (currentMin != previousMinute)
     {
+      WebSerial.println(nutrientReminderEpoch);
       // get current hour 0-23
       int currentHour = rtc.getHour(true);
       // control pump in auto
@@ -785,8 +786,10 @@ void sampleCurrent()
     pump1Samples = 0.0;
     pump2Samples = 0.0;
     airPumpSamples = 0.0;
-    // reset begin sampling
+    // start timer to sample again
+    statusUpdateMillisCounter = millis() + STATUS_UPDATE_INTERVAL;
     beginSampling = false;
+    WebSerial.println("End Sampling!");
   }
 }
 void checkPumpAlarms()
@@ -814,8 +817,8 @@ void checkPumpAlarms()
         events.send(p1Alarm.c_str(), "waterPump1Header", millis());
         // send alarm to bot
         const String botPump1FailMessage = BOT_PUMP_FAIL_MESSAGE_1 + String("Water Pump 1") + BOT_PUMP_FAIL_MESSAGE_2;
-        bot.sendMessage(CHAT_ID, botPump1FailMessage);
-        // Serial.println("Pump1 alarm active");
+        // bot.sendMessage(CHAT_ID, botPump1FailMessage);
+        //  Serial.println("Pump1 alarm active");
       }
     }
   }
@@ -856,9 +859,9 @@ void checkPumpAlarms()
         events.send(p2Alarm.c_str(), "waterPump2Header", millis());
         // send alarm to bot
         // send alarm to bot
-        const String botPump1FailMessage = BOT_PUMP_FAIL_MESSAGE_1 + String("Water Pump 2") + BOT_PUMP_FAIL_MESSAGE_2;
-        bot.sendMessage(CHAT_ID, botPump1FailMessage);
-        // Serial.println("Pump2 alarm active");
+        const String botPump2FailMessage = BOT_PUMP_FAIL_MESSAGE_1 + String("Water Pump 2") + BOT_PUMP_FAIL_MESSAGE_2;
+        // bot.sendMessage(CHAT_ID, botPump2FailMessage);
+        //  Serial.println("Pump2 alarm active");
       }
     }
   }
@@ -898,7 +901,7 @@ void checkPumpAlarms()
         String airPumpAlarm = "<i class = \"fas fa-bell\" style = \"color:#c81919;\"></ i> Air Pump";
         events.send(airPumpAlarm.c_str(), "airPumpHeader", millis());
         // send alarm to bot
-        bot.sendMessage(CHAT_ID, BOT_AIR_PUMP_FAIL_MESSAGE);
+        // bot.sendMessage(CHAT_ID, BOT_AIR_PUMP_FAIL_MESSAGE);
         Serial.println("Air pump alarm active");
       }
     }
@@ -923,10 +926,9 @@ void updateNutrientReminder()
   nutrientAlarm = false;
   // set next reminder
   nutrientReminderEpoch = rtc.getEpoch() + NUTRIENT_REMINDER_INTERVAL;
-  WebSerial.println(String(nutrientReminderEpoch));
   // save to preferences
   preferences.begin("nft", false);
-  preferences.putULong("nutrientReminderEpoch", nutrientReminderEpoch);
+  preferences.putULong64("nRE", nutrientReminderEpoch);
   preferences.end();
   // update web
   String nutrientDate = "<span style = \"color:#000000;\">" + getNewNutrientDate(nutrientReminderEpoch) + "</span>";
@@ -999,7 +1001,7 @@ void handleNewMessages(int numNewMessages)
       // load saved data
       preferences.begin("nft", false);
       nutrientReminderEpoch = rtc.getEpoch();
-      nutrientReminderEpoch = preferences.putULong("nutrientReminderEpoch", nutrientReminderEpoch);
+      nutrientReminderEpoch = preferences.putULong64("nRE", nutrientReminderEpoch);
       preferences.end();
     }
   }
