@@ -59,6 +59,7 @@ void updateNutrientReminder();                          // when user adds plant 
 void sendNutrientReminder();                            // when nutrient date passes, send notification and update web
 String getNewNutrientDate(unsigned long nutrientEpoch); // convert epoch to formatted date string
 void handleNewMessages(int numNewMessages);             // handling new messages from telegram user
+String printBootReason();                               // debugging esp32 reset reason
 
 // Define NTP Client to get time
 WiFiUDP ntpUDP;
@@ -237,7 +238,10 @@ void setup()
   int startCounter = preferences.getUInt("startCounter", 0);
 
   if (startCounter != 0)
-    bot.sendMessage(CHAT_ID, String(startCounter)); // send restart bot message
+  {
+    String message = "Reset counter: " + String(startCounter) + ", " + printBootReason();
+    bot.sendMessage(CHAT_ID, message); // send restart bot message
+  }
   else
     bot.sendMessage(CHAT_ID, BOT_GREETING_MESSAGE); // send bot greeting message
   // update esp32 start counter
@@ -258,7 +262,7 @@ void loop()
   now = millis();
 
   // check if it is time to sample current
-  if ((!beginSampling) and (now - statusUpdateMillisCounter >= STATUS_UPDATE_INTERVAL))
+  if ((!beginSampling) and ((now - statusUpdateMillisCounter) >= STATUS_UPDATE_INTERVAL))
   {
     beginSampling = true;
     WebSerial.println("Start Sampling!");
@@ -313,7 +317,6 @@ void loop()
     /* --------------- MINUTE CHANGE -------------------*/
     if (currentMin != previousMinute)
     {
-      WebSerial.println(nutrientReminderEpoch);
       // get current hour 0-23
       int currentHour = rtc.getHour(true);
       // control pump in auto
@@ -598,12 +601,22 @@ void setPumpAuto(int pump_pin)
   }
   else
   {
-    airPumpCommand = true;
-    digitalWrite(AIR_PUMP_PIN, HIGH); // switching back to auto will just turn it on, it'll go back to 15 min on/off
+    if (currentHour >= 6 and currentHour < 18)
+    {
+      airPumpCommand = true;
+      digitalWrite(AIR_PUMP_PIN, HIGH);
+    }
+    else
+    {
+      airPumpCommand = false;
+      digitalWrite(AIR_PUMP_PIN, LOW);
+    }
+
     airPumpOverride = false;
     airPumpOverrideTimeEpochEnd = 0;
     // Send Events to the Web Client with the Sensor Readings
-    String pumpCommand = "On (Auto)";
+    String command = (airPumpCommand) ? " On " : " Off ";
+    String pumpCommand = command + "(Auto)";
     events.send(pumpCommand.c_str(), "airPumpCommand", millis());
   }
 }
@@ -1003,6 +1016,83 @@ void handleNewMessages(int numNewMessages)
       nutrientReminderEpoch = rtc.getEpoch();
       nutrientReminderEpoch = preferences.putULong64("nRE", nutrientReminderEpoch);
       preferences.end();
+    }
+  }
+}
+String printBootReason()
+{
+  esp_reset_reason_t reset_reason = esp_reset_reason();
+
+  switch (reset_reason)
+  {
+  case ESP_RST_UNKNOWN:
+    return ("Reset reason can not be determined");
+    break;
+  case ESP_RST_POWERON:
+    return ("Reset due to power-on event");
+    break;
+  case ESP_RST_EXT:
+    return ("Reset by external pin (not applicable for ESP32)");
+    break;
+  case ESP_RST_SW:
+    return ("Software reset via esp_restart");
+    break;
+  case ESP_RST_PANIC:
+    return ("Software reset due to exception/panic");
+    break;
+  case ESP_RST_INT_WDT:
+    return ("Reset (software or hardware) due to interrupt watchdog");
+    break;
+  case ESP_RST_TASK_WDT:
+    return ("Reset due to task watchdog");
+    break;
+  case ESP_RST_WDT:
+    return ("Reset due to other watchdogs");
+    break;
+  case ESP_RST_DEEPSLEEP:
+    return ("Reset after exiting deep sleep mode");
+    break;
+  case ESP_RST_BROWNOUT:
+    return ("Brownout reset (software or hardware)");
+    break;
+  case ESP_RST_SDIO:
+    return ("Reset over SDIO");
+    break;
+  }
+
+  if (reset_reason == ESP_RST_DEEPSLEEP)
+  {
+    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+
+    switch (wakeup_reason)
+    {
+    case ESP_SLEEP_WAKEUP_UNDEFINED:
+      return ("In case of deep sleep: reset was not caused by exit from deep sleep");
+      break;
+    case ESP_SLEEP_WAKEUP_ALL:
+      return ("Not a wakeup cause: used to disable all wakeup sources with esp_sleep_disable_wakeup_source");
+      break;
+    case ESP_SLEEP_WAKEUP_EXT0:
+      return ("Wakeup caused by external signal using RTC_IO");
+      break;
+    case ESP_SLEEP_WAKEUP_EXT1:
+      return ("Wakeup caused by external signal using RTC_CNTL");
+      break;
+    case ESP_SLEEP_WAKEUP_TIMER:
+      return ("Wakeup caused by timer");
+      break;
+    case ESP_SLEEP_WAKEUP_TOUCHPAD:
+      return ("Wakeup caused by touchpad");
+      break;
+    case ESP_SLEEP_WAKEUP_ULP:
+      return ("Wakeup caused by ULP program");
+      break;
+    case ESP_SLEEP_WAKEUP_GPIO:
+      return ("Wakeup caused by GPIO (light sleep only)");
+      break;
+    case ESP_SLEEP_WAKEUP_UART:
+      return ("Wakeup caused by UART (light sleep only)");
+      break;
     }
   }
 }
